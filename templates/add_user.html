@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block title %}Add User - Smart Weather System{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card-futuristic">
+                <div class="card-header glass-effect">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-user-plus me-2"></i>Add New User
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('add_user') }}">
+                        <!-- Basic Information -->
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="username" class="form-label">Username</label>
+                                    <input type="text" class="form-control bg-dark text-light border-secondary" 
+                                           id="username" name="username" required 
+                                           placeholder="Enter username">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="email" class="form-label">Email</label>
+                                    <input type="email" class="form-control bg-dark text-light border-secondary" 
+                                           id="email" name="email" required 
+                                           placeholder="Enter email">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <label for="location" class="form-label">Location</label>
+                            <input type="text" class="form-control bg-dark text-light border-secondary" 
+                                   id="location" name="location" required 
+                                   placeholder="Enter city name">
+                            <div class="form-text text-muted">
+                                This location will be used for weather monitoring and alerts.
+                            </div>
+                        </div>
+
+                        <!-- Weather Preferences -->
+                        <div class="mb-4">
+                            <h6 class="border-bottom pb-2 mb-3">
+                                <i class="fas fa-sliders-h me-2"></i>Weather Preferences
+                            </h6>
+                            
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="temperature_min" class="form-label">Min Temperature (°C)</label>
+                                    <input type="number" class="form-control bg-dark text-light border-secondary" 
+                                           id="temperature_min" name="temperature_min" value="15" min="-10" max="40">
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="temperature_max" class="form-label">Max Temperature (°C)</label>
+                                    <input type="number" class="form-control bg-dark text-light border-secondary" 
+                                           id="temperature_max" name="temperature_max" value="25" min="-10" max="40">
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Preferred Activities</label>
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" name="preferred_activities" value="walking" id="walking">
+                                            <label class="form-check-label" for="walking">
+                                                <i class="fas fa-walking me-1"></i>Walking
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" name="preferred_activities" value="running" id="running">
+                                            <label class="form-check-label" for="running">
+                                                <i class="fas fa-running me-1"></i>Running
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" name="preferred_activities" value="cycling" id="cycling">
+                                            <label class="form-check-label" for="cycling">
+                                                <i class="fas fa-bicycle me-1"></i>Cycling
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" name="preferred_activities" value="reading" id="reading">
+                                            <label class="form-check-label" for="reading">
+                                                <i class="fas fa-book me-1"></i>Reading
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" name="preferred_activities" value="gardening" id="gardening">
+                                            <label class="form-check-label" for="gardening">
+                                                <i class="fas fa-seedling me-1"></i>Gardening
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" name="preferred_activities" value="swimming" id="swimming">
+                                            <label class="form-check-label" for="swimming">
+                                                <i class="fas fa-swimmer me-1"></i>Swimming
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Weather Avoidance</label>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" name="avoid_rain" id="avoid_rain" checked>
+                                            <label class="form-check-label" for="avoid_rain">
+                                                <i class="fas fa-cloud-rain me-1"></i>Avoid Rain
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" name="avoid_extreme_heat" id="avoid_extreme_heat" checked>
+                                            <label class="form-check-label" for="avoid_extreme_heat">
+                                                <i class="fas fa-temperature-high me-1"></i>Avoid Extreme Heat
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Alert Preferences -->
+                        <div class="mb-4">
+                            <h6 class="border-bottom pb-2 mb-3">
+                                <i class="fas fa-bell me-2"></i>Alert Preferences
+                            </h6>
+                            
+                            <div class="alert alert-info glass-effect">
+                                <i class="fas fa-info-circle me-2"></i>
+                                User will automatically receive alerts based on their preferences and location weather conditions.
+                            </div>
+                        </div>
+
+                        <!-- Submit Buttons -->
+                        <div class="d-flex justify-content-between">
+                            <a href="{{ url_for('user_management') }}" class="btn btn-outline-secondary">
+                                <i class="fas fa-arrow-left me-1"></i>Back to Users
+                            </a>
+                            <button type="submit" class="btn btn-futuristic">
+                                <i class="fas fa-save me-1"></i>Create User
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Temperature range validation
+        const tempMin = document.getElementById('temperature_min');
+        const tempMax = document.getElementById('temperature_max');
+        
+        function validateTemperatureRange() {
+            if (parseInt(tempMin.value) >= parseInt(tempMax.value)) {
+                tempMax.setCustomValidity('Max temperature must be greater than min temperature');
+            } else {
+                tempMax.setCustomValidity('');
+            }
+        }
+        
+        tempMin.addEventListener('change', validateTemperatureRange);
+        tempMax.addEventListener('change', validateTemperatureRange);
+    });
+</script>
+{% endblock %}

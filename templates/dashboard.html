@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Smart Weather System{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col">
+            <h1 class="display-5 fw-bold text-glow mb-2">
+                <i class="fas fa-dashboard me-2"></i>Weather Dashboard
+            </h1>
+            <p class="text-muted">Real-time weather monitoring with AI predictions</p>
+        </div>
+        <div class="col-auto">
+            <div class="ai-status {{ 'trained' if ai_status == 'Trained' else 'training' }}">
+                <i class="fas fa-robot me-1"></i>
+                AI: {{ ai_status }}
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="row g-4 mb-5">
+        <div class="col-md-3">
+            <div class="stat-card">
+                <i class="fas fa-users text-primary"></i>
+                <h3 class="fw-bold">{{ total_users }}</h3>
+                <p class="text-muted mb-0">Active Users</p>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card">
+                <i class="fas fa-bell text-warning"></i>
+                <h3 class="fw-bold">{{ total_alerts }}</h3>
+                <p class="text-muted mb-0">Active Alerts</p>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card">
+                <i class="fas fa-cloud-sun text-info"></i>
+                <h3 class="fw-bold" id="current-temp">--</h3>
+                <p class="text-muted mb-0">Current Temp</p>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card">
+                <i class="fas fa-brain text-success"></i>
+                <h3 class="fw-bold">85%</h3>
+                <p class="text-muted mb-0">AI Accuracy</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Current Weather -->
+        <div class="col-lg-6">
+            <div class="card-futuristic">
+                <div class="card-header glass-effect">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-location-dot me-2"></i>Current Weather - London
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-4">
+                            <div class="weather-icon">
+                                <i class="fas fa-sun"></i>
+                            </div>
+                            <h4 id="current-temp-display" class="temperature temp-mild">20.5°C</h4>
+                            <small class="text-muted" id="current-condition">Sunny</small>
+                        </div>
+                        <div class="col-8">
+                            <div class="row">
+                                <div class="col-6 mb-3">
+                                    <small class="text-muted">Humidity</small>
+                                    <div class="fw-bold" id="current-humidity">65%</div>
+                                </div>
+                                <div class="col-6 mb-3">
+                                    <small class="text-muted">Wind</small>
+                                    <div class="fw-bold" id="current-wind">15 km/h</div>
+                                </div>
+                                <div class="col-6">
+                                    <small class="text-muted">Pressure</small>
+                                    <div class="fw-bold" id="current-pressure">1013 hPa</div>
+                                </div>
+                                <div class="col-6">
+                                    <small class="text-muted">Feels Like</small>
+                                    <div class="fw-bold">21°C</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- AI Prediction -->
+                    <div class="mt-3 p-3 glass-effect rounded">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <small class="text-muted">AI PREDICTION (1 hour)</small>
+                                <div id="ai-prediction" class="fw-bold">22.1°C (85% confidence)</div>
+                            </div>
+                            <i class="fas fa-robot text-primary"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Activities -->
+        <div class="col-lg-6">
+            <div class="card-futuristic h-100">
+                <div class="card-header glass-effect">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-history me-2"></i>Recent Activities
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if recent_activities %}
+                        {% for activity in recent_activities %}
+                        <div class="d-flex align-items-center border-bottom pb-3 mb-3">
+                            <div class="flex-shrink-0">
+                                <div class="weather-icon small">
+                                    <i class="fas fa-{{ 'running' if activity.activity_type == 'Running' else 'book' if activity.activity_type == 'Reading' else 'biking' }}"></i>
+                                </div>
+                            </div>
+                            <div class="flex-grow-1 ms-3">
+                                <div class="fw-bold">{{ activity.username }}</div>
+                                <div class="text-muted small">{{ activity.activity_type }} • {{ activity.weather_condition }}</div>
+                            </div>
+                            <div class="flex-shrink-0">
+                                <small class="text-muted">{{ activity.activity_date[:16] }}</small>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-inbox fa-2x mb-2"></i>
+                            <p>No recent activities</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Weather Data -->
+        <div class="col-12">
+            <div class="card-futuristic">
+                <div class="card-header glass-effect">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-database me-2"></i>Recent Weather Data
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-futuristic">
+                            <thead>
+                                <tr>
+                                    <th>Location</th>
+                                    <th>Temperature</th>
+                                    <th>Condition</th>
+                                    <th>Humidity</th>
+                                    <th>Wind Speed</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if recent_weather %}
+                                    {% for weather in recent_weather %}
+                                    <tr>
+                                        <td>{{ weather.location }}</td>
+                                        <td class="temperature temp-{{ 'cold' if weather.temperature < 10 else 'mild' if weather.temperature < 20 else 'warm' }}">{{ "%.1f"|format(weather.temperature) }}°C</td>
+                                        <td>
+                                            <i class="fas fa-{{ 'sun' if 'Sunny' in weather.weather_condition else 'cloud' if 'Cloud' in weather.weather_condition else 'cloud-rain' }} me-1"></i>
+                                            {{ weather.weather_condition }}
+                                        </td>
+                                        <td>{{ weather.humidity }}%</td>
+                                        <td>{{ weather.wind_speed }} km/h</td>
+                                        <td><small class="text-muted">{{ weather.recorded_at[:16] }}</small></td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="6" class="text-center text-muted py-3">
+                                            No weather data available
+                                        </td>
+                                    </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Initialize dashboard-specific functionality
+    document.addEventListener('DOMContentLoaded', function() {
+        // Request initial weather data
+        if (window.weatherSystem) {
+            window.weatherSystem.requestWeather('London');
+        }
+        
+        // Simulate AI training for demo
+        setTimeout(() => {
+            if (window.weatherSystem && "{{ ai_status }}" === "Training") {
+                window.weatherSystem.simulateAITraining();
+            }
+        }, 3000);
+    });
+</script>
+{% endblock %}

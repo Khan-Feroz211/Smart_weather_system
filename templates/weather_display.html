@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block title %}Weather Display - Smart Weather System{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col">
+            <h1 class="display-5 fw-bold text-glow mb-2">
+                <i class="fas fa-map-marker-alt me-2"></i>Live Weather Display
+            </h1>
+            <p class="text-muted">Real-time weather data from multiple locations</p>
+        </div>
+        <div class="col-auto">
+            <div class="input-group">
+                <input type="text" class="form-control bg-dark text-light border-secondary" 
+                       placeholder="Search location..." id="locationSearch">
+                <button class="btn btn-futuristic" onclick="searchLocation()">
+                    <i class="fas fa-search"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Weather Grid -->
+    <div class="row g-4" id="weatherGrid">
+        <!-- Weather cards will be dynamically loaded here -->
+    </div>
+
+    <!-- AI Predictions Section -->
+    <div class="row mt-5">
+        <div class="col-12">
+            <div class="card-futuristic">
+                <div class="card-header glass-effect">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-robot me-2"></i>AI Weather Predictions
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row" id="predictionsContainer">
+                        <!-- Predictions will be loaded here -->
+                        <div class="col-12 text-center text-muted py-4">
+                            <i class="fas fa-brain fa-2x mb-3"></i>
+                            <p>AI predictions will appear here as data is collected</p>
+                            <div class="loading-dots">Loading</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Default locations to display
+    const defaultLocations = ['London', 'New York', 'Tokyo', 'Paris', 'Sydney'];
+    
+    function initializeWeatherGrid() {
+        const weatherGrid = document.getElementById('weatherGrid');
+        
+        defaultLocations.forEach(location => {
+            const weatherCard = createWeatherCard(location);
+            weatherGrid.appendChild(weatherCard);
+            
+            // Request initial weather data
+            if (window.weatherSystem) {
+                window.weatherSystem.requestWeather(location);
+            }
+        });
+    }
+    
+    function createWeatherCard(location) {
+        const col = document.createElement('div');
+        col.className = 'col-md-6 col-lg-4';
+        col.innerHTML = `
+            <div class="card-futuristic weather-card" data-location="${location}">
+                <div class="card-header glass-effect">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-map-marker-alt me-2 text-danger"></i>${location}
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="text-center mb-3">
+                        <div class="weather-icon">
+                            <i class="fas fa-cloud fa-2x"></i>
+                        </div>
+                        <h2 class="temperature temp-mild mt-2">--°C</h2>
+                        <p class="weather-condition text-muted">Loading...</p>
+                    </div>
+                    
+                    <div class="row text-center">
+                        <div class="col-4">
+                            <small class="text-muted">Humidity</small>
+                            <div class="fw-bold humidity">--%</div>
+                        </div>
+                        <div class="col-4">
+                            <small class="text-muted">Wind</small>
+                            <div class="fw-bold wind">-- km/h</div>
+                        </div>
+                        <div class="col-4">
+                            <small class="text-muted">Pressure</small>
+                            <div class="fw-bold pressure">-- hPa</div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3 p-2 glass-effect rounded">
+                        <small class="text-muted">AI PREDICTION (1h)</small>
+                        <div class="fw-bold prediction">Collecting data...</div>
+                    </div>
+                </div>
+                <div class="card-footer bg-transparent border-top-0">
+                    <small class="text-muted update-time">Last update: --</small>
+                </div>
+            </div>
+        `;
+        return col;
+    }
+    
+    function searchLocation() {
+        const searchInput = document.getElementById('locationSearch');
+        const location = searchInput.value.trim();
+        
+        if (location && !defaultLocations.includes(location)) {
+            defaultLocations.push(location);
+            const weatherGrid = document.getElementById('weatherGrid');
+            const newCard = createWeatherCard(location);
+            weatherGrid.appendChild(newCard);
+            
+            if (window.weatherSystem) {
+                window.weatherSystem.requestWeather(location);
+            }
+            
+            searchInput.value = '';
+        }
+    }
+    
+    // Initialize when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        initializeWeatherGrid();
+        
+        // Add Enter key support for search
+        document.getElementById('locationSearch').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                searchLocation();
+            }
+        });
+    });
+</script>
+{% endblock %}

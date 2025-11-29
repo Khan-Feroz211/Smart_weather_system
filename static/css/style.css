@@ -1,0 +1,281 @@
+/* Optimized Futuristic Theme - Lightweight for 128MB GPU */
+:root {
+    --primary: #2563eb;
+    --primary-dark: #1d4ed8;
+    --dark-bg: #0f172a;
+    --card-bg: #1e293b;
+    --text-light: #f8fafc;
+    --neon-glow: 0 0 10px currentColor;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+}
+
+/* Minimal Base Styles - Optimized */
+* {
+    box-sizing: border-box;
+}
+
+body {
+    background: var(--dark-bg);
+    color: var(--text-light);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+/* Lightweight Navbar */
+.navbar-futuristic {
+    background: rgba(30, 41, 59, 0.95) !important;
+    backdrop-filter: blur(5px); /* Reduced for performance */
+    border-bottom: 1px solid rgba(37, 99, 235, 0.3);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    padding: 0.75rem 0;
+}
+
+.navbar-brand {
+    font-weight: 700;
+    font-size: 1.25rem;
+}
+
+/* Optimized Cards */
+.card-futuristic {
+    background: var(--card-bg);
+    border: 1px solid rgba(37, 99, 235, 0.2);
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 1rem;
+}
+
+.card-futuristic::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(37, 99, 235, 0.1), transparent);
+    transition: left 0.5s ease;
+}
+
+.card-futuristic:hover::before {
+    left: 100%;
+}
+
+.card-futuristic:hover {
+    transform: translateY(-3px);
+    border-color: var(--primary);
+    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.2);
+}
+
+/* Stats Cards */
+.stat-card {
+    background: linear-gradient(135deg, var(--card-bg) 0%, #334155 100%);
+    border: 1px solid rgba(37, 99, 235, 0.3);
+    border-radius: 12px;
+    padding: 1.25rem;
+    position: relative;
+    overflow: hidden;
+    text-align: center;
+}
+
+.stat-card i {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+
+.stat-card h3 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin: 0.5rem 0;
+}
+
+/* Button Animations */
+.btn-futuristic {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+    border: none;
+    border-radius: 8px;
+    color: white;
+    padding: 0.6rem 1.25rem;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-futuristic:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    color: white;
+}
+
+/* Table Styling */
+.table-futuristic {
+    background: var(--card-bg);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.table-futuristic th {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+    color: white;
+    border: none;
+    padding: 1rem;
+    font-weight: 600;
+}
+
+.table-futuristic td {
+    background: var(--card-bg);
+    border-color: rgba(255, 255, 255, 0.1);
+    padding: 0.875rem;
+    transition: background-color 0.2s ease;
+}
+
+.table-futuristic tr:hover td {
+    background: rgba(37, 99, 235, 0.05);
+}
+
+/* Weather Icons - FIXED with vendor prefixes */
+.weather-icon {
+    font-size: 1.75rem;
+    background: linear-gradient(135deg, #fbbf24, #f59e0b);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-5px); }
+}
+
+/* Alert Badges */
+.alert-badge {
+    background: linear-gradient(135deg, var(--danger), #dc2626);
+    color: white;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    animation: pulse 2s infinite;
+}
+
+.warning-badge {
+    background: linear-gradient(135deg, var(--warning), #d97706);
+}
+
+.success-badge {
+    background: linear-gradient(135deg, var(--success), #059669);
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+/* Real-time indicators */
+.live-indicator {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background: var(--success);
+    border-radius: 50%;
+    animation: blink 2s infinite;
+    margin-right: 0.5rem;
+}
+
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0.3; }
+}
+
+/* Loading Animation */
+.loading-dots::after {
+    content: '...';
+    animation: dots 1.5s steps(4, end) infinite;
+}
+
+@keyframes dots {
+    0%, 20% { content: '.'; }
+    40% { content: '..'; }
+    60%, 100% { content: '...'; }
+}
+
+/* Progress Bars */
+.progress-futuristic {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    overflow: hidden;
+    height: 6px;
+}
+
+.progress-futuristic .progress-bar {
+    background: linear-gradient(90deg, var(--primary), #60a5fa);
+    border-radius: 8px;
+    transition: width 0.8s ease-in-out;
+}
+
+/* AI Status Indicator */
+.ai-status {
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.ai-status.trained {
+    background: rgba(16, 185, 129, 0.2);
+    color: var(--success);
+    border: 1px solid var(--success);
+}
+
+.ai-status.training {
+    background: rgba(245, 158, 11, 0.2);
+    color: var(--warning);
+    border: 1px solid var(--warning);
+}
+
+/* Utility Classes */
+.text-glow {
+    text-shadow: 0 0 8px currentColor;
+}
+
+.glass-effect {
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(5px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .card-futuristic:hover {
+        transform: none; /* Disable hover effects on mobile for performance */
+    }
+    
+    .stat-card {
+        padding: 1rem;
+    }
+    
+    .stat-card h3 {
+        font-size: 1.5rem;
+    }
+}
+
+/* Temperature colors */
+.temp-cold { color: #60a5fa; }
+.temp-mild { color: #34d399; }
+.temp-warm { color: #fbbf24; }
+.temp-hot { color: #f87171; }
+
+/* Weather condition colors */
+.weather-sunny { color: #fbbf24; }
+.weather-cloudy { color: #9ca3af; }
+.weather-rainy { color: #60a5fa; }
+.weather-stormy { color: #7c3aed; }

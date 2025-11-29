@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}User Management - Smart Weather System{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="display-5 fw-bold text-glow mb-2">
+                <i class="fas fa-users me-2"></i>User Management
+            </h1>
+            <p class="text-muted">Manage users and their weather preferences</p>
+        </div>
+        <a href="{{ url_for('add_user') }}" class="btn btn-futuristic">
+            <i class="fas fa-plus me-2"></i>Add User
+        </a>
+    </div>
+
+    <!-- Users Table -->
+    <div class="card-futuristic">
+        <div class="card-header glass-effect">
+            <h5 class="card-title mb-0">
+                <i class="fas fa-list me-2"></i>Registered Users
+            </h5>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-futuristic">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Username</th>
+                            <th>Email</th>
+                            <th>Location</th>
+                            <th>Activities</th>
+                            <th>Alerts</th>
+                            <th>Joined</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if users %}
+                            {% for user in users %}
+                            <tr>
+                                <td><strong>#{{ user.user_id }}</strong></td>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <div class="flex-shrink-0">
+                                            <div class="bg-primary rounded-circle d-flex align-items-center justify-content-center" style="width: 32px; height: 32px;">
+                                                <i class="fas fa-user text-white small"></i>
+                                            </div>
+                                        </div>
+                                        <div class="flex-grow-1 ms-2">
+                                            {{ user.username }}
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>{{ user.email }}</td>
+                                <td>
+                                    <i class="fas fa-map-marker-alt text-danger me-1"></i>
+                                    {{ user.location }}
+                                </td>
+                                <td>
+                                    <span class="badge bg-primary rounded-pill">{{ user.activity_count or 0 }}</span>
+                                </td>
+                                <td>
+                                    <span class="badge bg-warning rounded-pill">{{ user.alert_count or 0 }}</span>
+                                </td>
+                                <td>
+                                    <small class="text-muted">{{ user.created_at[:10] }}</small>
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm">
+                                        <a href="{{ url_for('user_profile', user_id=user.user_id) }}" 
+                                           class="btn btn-outline-primary">
+                                            <i class="fas fa-eye"></i>
+                                        </a>
+                                        <button class="btn btn-outline-warning">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button class="btn btn-outline-danger">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="8" class="text-center text-muted py-4">
+                                    <i class="fas fa-users fa-2x mb-3"></i>
+                                    <p>No users found</p>
+                                    <a href="{{ url_for('add_user') }}" class="btn btn-futuristic btn-sm">
+                                        <i class="fas fa-plus me-1"></i>Add First User
+                                    </a>
+                                </td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="row mt-4">
+        <div class="col-md-4">
+            <div class="card-futuristic text-center">
+                <div class="card-body">
+                    <i class="fas fa-user-plus fa-2x text-success mb-2"></i>
+                    <h4>{{ users|length }}</h4>
+                    <p class="text-muted mb-0">Total Users</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card-futuristic text-center">
+                <div class="card-body">
+                    <i class="fas fa-bell fa-2x text-warning mb-2"></i>
+                    <h4>{{ total_alerts }}</h4>
+                    <p class="text-muted mb-0">Active Alerts</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card-futuristic text-center">
+                <div class="card-body">
+                    <i class="fas fa-chart-line fa-2x text-info mb-2"></i>
+                    <h4>{{ total_activities }}</h4>
+                    <p class="text-muted mb-0">Activities Logged</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+
+{% block title %}AI Recommendations - Smart Weather System{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col">
+            <h1 class="display-5 fw-bold text-glow mb-2">
+                <i class="fas fa-robot me-2"></i>AI Recommendations
+            </h1>
+            <p class="text-muted">Personalized weather-based recommendations powered by AI</p>
+        </div>
+        <div class="col-auto">
+            <div class="ai-status trained">
+                <i class="fas fa-brain me-1"></i>
+                AI Model: Active
+            </div>
+        </div>
+    </div>
+
+    <!-- Recommendation Cards -->
+    <div class="row g-4" id="recommendationsGrid">
+        <!-- Recommendations will be loaded dynamically -->
+    </div>
+
+    <!-- AI Insights -->
+    <div class="row mt-5">
+        <div class="col-lg-8">
+            <div class="card-futuristic">
+                <div class="card-header glass-effect">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-chart-line me-2"></i>AI Weather Insights
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-4">
+                                <h6>Temperature Trends</h6>
+                                <div class="progress progress-futuristic mb-2">
+                                    <div class="progress-bar" style="width: 75%"></div>
+                                </div>
+                                <small class="text-muted">Gradual warming trend detected</small>
+                            </div>
+                            
+                            <div class="mb-4">
+                                <h6>Precipitation Probability</h6>
+                                <div class="progress progress-futuristic mb-2">
+                                    <div class="progress-bar bg-info" style="width: 30%"></div>
+                                </div>
+                                <small class="text-muted">Low chance of rain next 24h</small>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <div class="mb-4">
+                                <h6>Wind Patterns</h6>
+                                <div class="progress progress-futuristic mb-2">
+                                    <div class="progress-bar bg-warning" style="width: 60%"></div>
+                                </div>
+                                <small class="text-muted">Moderate winds expected</small>
+                            </div>
+                            
+                            <div class="mb-4">
+                                <h6>AI Confidence</h6>
+                                <div class="progress progress-futuristic mb-2">
+                                    <div class="progress-bar bg-success" style="width: 85%"></div>
+                                </div>
+                                <small class="text-muted">High prediction accuracy</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-lg-4">
+            <div class="card-futuristic h-100">
+                <div class="card-header glass-effect">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-cogs me-2"></i>AI Model Status
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="list-group list-group-flush">
+                        <div class="list-group-item bg-transparent text-light border-secondary d-flex justify-content-between">
+                            <span>Model Version</span>
+                            <strong>v2.1.4</strong>
+                        </div>
+                        <div class="list-group-item bg-transparent text-light border-secondary d-flex justify-content-between">
+                            <span>Training Data</span>
+                            <strong>1.2M points</strong>
+                        </div>
+                        <div class="list-group-item bg-transparent text-light border-secondary d-flex justify-content-between">
+                            <span>Accuracy</span>
+                            <strong class="text-success">85.3%</strong>
+                        </div>
+                        <div class="list-group-item bg-transparent text-light border-secondary d-flex justify-content-between">
+                            <span>Last Training</span>
+                            <strong>2 hours ago</strong>
+                        </div>
+                        <div class="list-group-item bg-transparent text-light border-secondary d-flex justify-content-between">
+                            <span>Predictions Made</span>
+                            <strong>12,847</strong>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3 text-center">
+                        <button class="btn btn-futuristic btn-sm" onclick="retrainModel()">
+                            <i class="fas fa-sync me-1"></i>Retrain Model
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Sample recommendation data
+    const sampleRecommendations = [
+        {
+            type: 'activity',
+            title: 'Perfect for Outdoor Activities',
+            description: 'Current weather conditions are ideal for walking, cycling, and outdoor sports.',
+            icon: 'fa-running',
+            confidence: 92,
+            location: 'London'
+        },
+        {
+            type: 'clothing',
+            title: 'Light Jacket Recommended',
+            description: 'Temperatures are mild but a light jacket will keep you comfortable.',
+            icon: 'fa-tshirt',
+            confidence: 88,
+            location: 'All Locations'
+        },
+        {
+            type: 'health',
+            title: 'Stay Hydrated',
+            description: 'UV index is moderate. Remember to drink water and use sunscreen.',
+            icon: 'fa-tint',
+            confidence: 85,
+            location: 'All Locations'
+        },
+        {
+            type: 'travel',
+            title: 'Great Travel Conditions',
+            description: 'Clear skies and light winds make this perfect for travel plans.',
+            icon: 'fa-plane',
+            confidence: 90,
+            location: 'All Locations'
+        }
+    ];
+    
+    function initializeRecommendations() {
+        const grid = document.getElementById('recommendationsGrid');
+        
+        sampleRecommendations.forEach(rec => {
+            const col = document.createElement('div');
+            col.className = 'col-md-6 col-lg-3';
+            col.innerHTML = createRecommendationCard(rec);
+            grid.appendChild(col);
+        });
+    }
+    
+    function createRecommendationCard(recommendation) {
+        return `
+            <div class="card-futuristic h-100">
+                <div class="card-body">
+                    <div class="text-center mb-3">
+                        <div class="weather-icon">
+                            <i class="fas ${recommendation.icon} fa-2x"></i>
+                        </div>
+                    </div>
+                    
+                    <h6 class="card-title">${recommendation.title}</h6>
+                    <p class="card-text small text-muted">${recommendation.description}</p>
+                    
+                    <div class="mt-auto">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <small class="text-muted">${recommendation.location}</small>
+                                                        <span class="badge bg-success rounded-pill">${recommendation.confidence}%</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer bg-transparent border-top-0 pt-0">
+                    <button class="btn btn-futuristic btn-sm w-100" onclick="applyRecommendation('${recommendation.type}')">
+                        <i class="fas fa-check me-1"></i>Apply
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+    
+    function applyRecommendation(type) {
+        const messages = {
+            'activity': 'Outdoor activities scheduled!',
+            'clothing': 'Clothing recommendation applied!',
+            'health': 'Health reminder set!',
+            'travel': 'Travel conditions noted!'
+        };
+        
+        if (window.weatherSystem) {
+            window.weatherSystem.showNotification(`✅ ${messages[type] || 'Recommendation applied!'}`, 'success');
+        }
+    }
+    
+    function retrainModel() {
+        if (window.weatherSystem) {
+            window.weatherSystem.showNotification('🔄 Retraining AI model...', 'info');
+            
+            // Simulate training process
+            setTimeout(() => {
+                window.weatherSystem.showNotification('✅ AI model retrained successfully! Accuracy improved to 86.1%', 'success');
+                
+                // Refresh recommendations
+                document.getElementById('recommendationsGrid').innerHTML = '';
+                initializeRecommendations();
+            }, 3000);
+        }
+    }
+    
+    // Initialize when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        initializeRecommendations();
+    });
+</script>
+{% endblock %}
