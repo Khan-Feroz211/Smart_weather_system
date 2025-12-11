@@ -1,5 +1,12 @@
 # 🌦️ Smart Weather System
 
+## Participants 
+ 1. Feroz Ujjan   F24605023
+ 2. Hansain Ali   F24605030
+ 3. Hassan Naseer F24605021
+ 4. Ali Naqi      F24605014
+
+
 A real-time, AI-powered weather monitoring and prediction system built with Flask, Socket.IO, and Machine Learning. This intelligent system provides live weather updates, personalized alerts, activity recommendations, and accurate weather predictions using advanced AI algorithms.
 
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
