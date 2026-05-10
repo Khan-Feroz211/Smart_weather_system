@@ -219,7 +219,7 @@
                                 {% if latest_pipeline %}
                                     {% for item in latest_pipeline %}
                                     <tr>
-                                        <td><small class="text-muted">{{ item.created_at[:16] }}</small></td>
+                                        <td><small class="text-muted">{{ (item.created_at or 'N/A')[:16] }}</small></td>
                                         <td>{{ item.location }}</td>
                                         <td>{{ item.sensor_id }}</td>
                                         <td>{{ item.quality_label }} ({{ "%.2f"|format(item.validation_score or 0) }})</td>

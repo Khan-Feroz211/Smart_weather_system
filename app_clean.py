@@ -50,6 +50,9 @@ SENSOR_FIELD_RANGES = {
 
 recent_cleaned_by_location = defaultdict(lambda: deque(maxlen=24))
 
+SCHEMA_TABLE_WHITELIST = {'weather_data'}
+WEATHER_NUMERIC_FIELDS = {'temperature', 'humidity', 'pressure', 'wind_speed'}
+
 class WeatherAI:
     def __init__(self):
         self.model = RandomForestRegressor(n_estimators=50, random_state=42, max_depth=10)
@@ -195,6 +198,14 @@ weather_ai = WeatherAI()
 def ensure_column_exists(conn, table_name, column_name, column_def):
     """Add missing column to an existing table"""
     try:
+        if table_name not in SCHEMA_TABLE_WHITELIST:
+            raise ValueError(f"Unsupported table for migration: {table_name}")
+        if not column_name.replace('_', '').isalnum():
+            raise ValueError(f"Unsafe column name: {column_name}")
+        allowed_defs = {'TEXT', 'REAL', 'INTEGER', 'BOOLEAN'}
+        if column_def not in allowed_defs:
+            raise ValueError(f"Unsupported column definition: {column_def}")
+
         existing = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
         column_names = {col['name'] for col in existing}
         if column_name not in column_names:
@@ -331,6 +342,8 @@ def validate_sensor_data(sensor_record):
 
 def historical_field_average(location, field):
     """Get historical average for fallback imputation"""
+    if field not in WEATHER_NUMERIC_FIELDS:
+        return None
     conn = get_db_connection()
     if not conn:
         return None
