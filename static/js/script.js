@@ -259,6 +259,20 @@ class WeatherSystem {
         if (data.prediction) {
             this.updatePredictionDisplay(data.prediction);
         }
+
+        if (data.quality) {
+            const qualityElement = document.getElementById('ai-quality');
+            if (qualityElement) {
+                qualityElement.textContent = `Quality: ${data.quality.quality_label} (${(data.quality.confidence * 100).toFixed(0)}% confidence)`;
+            }
+        }
+
+        if (data.decision) {
+            const decisionElement = document.getElementById('ai-decision');
+            if (decisionElement) {
+                decisionElement.textContent = `Decision: ${data.decision.severity.toUpperCase()} - ${data.decision.recommended_action}`;
+            }
+        }
     }
 
     updatePredictionDisplay(prediction) {
@@ -273,7 +287,13 @@ class WeatherSystem {
 
     displayWeatherData(data) {
         console.log('Weather data received:', data);
-        // This would update specific weather display components
+        this.updateDashboardWeather({
+            location: data.location,
+            data: data.current,
+            prediction: data.prediction,
+            quality: data.quality,
+            decision: data.decision
+        });
     }
 
     updatePredictions(data) {

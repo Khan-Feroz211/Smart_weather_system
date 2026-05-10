@@ -48,6 +48,7 @@
                 <i class="fas fa-brain text-success"></i>
                 <h3 class="fw-bold">85%</h3>
                 <p class="text-muted mb-0">AI Accuracy</p>
+                <small class="text-muted">Sensor Fail: {{ sensor_failure_rate }}%</small>
             </div>
         </div>
     </div>
@@ -98,6 +99,8 @@
                             <div>
                                 <small class="text-muted">AI PREDICTION (1 hour)</small>
                                 <div id="ai-prediction" class="fw-bold">22.1°C (85% confidence)</div>
+                                <div id="ai-quality" class="small text-muted mt-1">Quality: pending</div>
+                                <div id="ai-decision" class="small text-warning mt-1">Decision: evaluating...</div>
                             </div>
                             <i class="fas fa-robot text-primary"></i>
                         </div>
@@ -183,6 +186,50 @@
                                         <td colspan="6" class="text-center text-muted py-3">
                                             No weather data available
                                         </td>
+                                    </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12">
+            <div class="card-futuristic">
+                <div class="card-header glass-effect">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-microchip me-2"></i>Latest Sensor Decisions
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-futuristic">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Location</th>
+                                    <th>Sensor</th>
+                                    <th>Quality</th>
+                                    <th>Severity</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if latest_pipeline %}
+                                    {% for item in latest_pipeline %}
+                                    <tr>
+                                        <td><small class="text-muted">{{ item.created_at[:16] if item.created_at else 'N/A' }}</small></td>
+                                        <td>{{ item.location }}</td>
+                                        <td>{{ item.sensor_id }}</td>
+                                        <td>{{ item.quality_label }} ({{ "%.2f"|format(item.validation_score or 0) }})</td>
+                                        <td>{{ item.severity }}</td>
+                                        <td>{{ item.recommended_action }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="6" class="text-center text-muted py-3">No sensor decisions available</td>
                                     </tr>
                                 {% endif %}
                             </tbody>
