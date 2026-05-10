@@ -279,3 +279,97 @@ body {
 .weather-cloudy { color: #9ca3af; }
 .weather-rainy { color: #60a5fa; }
 .weather-stormy { color: #7c3aed; }
+
+/* ============================================================
+   AGRICULTURE MODULE STYLES
+   ============================================================ */
+
+/* Health score ring colours (used via JS / inline styles) */
+.health-excellent { color: #10b981; }
+.health-good      { color: #34d399; }
+.health-fair      { color: #f59e0b; }
+.health-poor      { color: #ef4444; }
+
+/* Crop badge colours */
+.crop-wheat    { background: #d97706; }
+.crop-rice     { background: #0ea5e9; }
+.crop-cotton   { background: #7c3aed; }
+.crop-maize    { background: #16a34a; }
+.crop-sugarcane{ background: #65a30d; }
+
+/* Risk level colours */
+.risk-high   { color: #ef4444; font-weight:700; }
+.risk-medium { color: #f59e0b; font-weight:700; }
+.risk-low    { color: #10b981; }
+
+/* Farm / field cards */
+.agri-card {
+    background: linear-gradient(135deg, #1e293b 0%, #0f2515 100%);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 12px;
+    padding: 1.25rem;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.agri-card:hover {
+    border-color: #10b981;
+    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.2);
+    transform: translateY(-3px);
+}
+
+/* Health progress bar override for green */
+.progress-bar-health-good { background: linear-gradient(90deg, #10b981, #34d399); }
+.progress-bar-health-fair { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+.progress-bar-health-poor { background: linear-gradient(90deg, #ef4444, #f87171); }
+
+/* Irrigation badge */
+.irrigation-badge {
+    background: linear-gradient(135deg, #0ea5e9, #0284c7);
+    color: white;
+    padding: 0.2rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+/* Pest risk pill */
+.pest-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0.2rem 0.65rem;
+    border-radius: 12px;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+.pest-pill-high   { background: rgba(239,68,68,0.15); color: #ef4444; border:1px solid #ef4444; }
+.pest-pill-medium { background: rgba(245,158,11,0.15); color: #f59e0b; border:1px solid #f59e0b; }
+.pest-pill-low    { background: rgba(16,185,129,0.15); color: #10b981; border:1px solid #10b981; }
+
+/* Yield gap indicator */
+.yield-gap-ok   { color: #10b981; }
+.yield-gap-warn { color: #f59e0b; }
+.yield-gap-bad  { color: #ef4444; }
+
+/* Responsive breadcrumb */
+.breadcrumb { background: transparent; padding: 0; }
+.breadcrumb-item + .breadcrumb-item::before { color: rgba(255,255,255,0.4); }
+
+/* Glass form controls */
+.form-control.glass-effect,
+.form-select.glass-effect {
+    background: rgba(255,255,255,0.07) !important;
+    border: 1px solid rgba(37,99,235,0.25) !important;
+    color: var(--text-light) !important;
+    border-radius: 8px;
+    transition: border-color 0.2s ease;
+}
+.form-control.glass-effect:focus,
+.form-select.glass-effect:focus {
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 2px rgba(37,99,235,0.2) !important;
+    background: rgba(255,255,255,0.1) !important;
+}
+.form-select.glass-effect option { background: #1e293b; color: var(--text-light); }

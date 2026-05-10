@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+{% block title %}Agriculture Dashboard – Smart AgriWeather{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+
+  <!-- Header -->
+  <div class="row mb-4 align-items-center">
+    <div class="col">
+      <h1 class="display-6 fw-bold text-glow mb-1">
+        <i class="fas fa-seedling me-2 text-success"></i>Agriculture Dashboard
+      </h1>
+      <p class="text-muted mb-0">Crop health · pest risk · irrigation · yield forecast – all in one view</p>
+    </div>
+    <div class="col-auto d-flex gap-2">
+      <a href="{{ url_for('add_farm') }}" class="btn btn-success btn-futuristic">
+        <i class="fas fa-plus me-1"></i> Add Farm
+      </a>
+      <a href="{{ url_for('agri_alerts_view') }}" class="btn btn-warning btn-futuristic">
+        <i class="fas fa-bell me-1"></i> All Alerts
+      </a>
+    </div>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+      <div class="stat-card">
+        <i class="fas fa-tractor text-success"></i>
+        <h3 class="fw-bold">{{ total_farms }}</h3>
+        <p class="text-muted mb-0">Farms</p>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="stat-card">
+        <i class="fas fa-map text-info"></i>
+        <h3 class="fw-bold">{{ total_fields }}</h3>
+        <p class="text-muted mb-0">Fields</p>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="stat-card">
+        <i class="fas fa-heart-pulse" style="color:#10b981;font-size:2rem;"></i>
+        <h3 class="fw-bold {% if avg_health >= 75 %}text-success{% elif avg_health >= 50 %}text-warning{% else %}text-danger{% endif %}">
+          {{ avg_health }}%
+        </h3>
+        <p class="text-muted mb-0">Avg Crop Health</p>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="stat-card">
+        <i class="fas fa-triangle-exclamation text-danger"></i>
+        <h3 class="fw-bold">{{ active_alerts|length }}</h3>
+        <p class="text-muted mb-0">Active Alerts</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4">
+
+    <!-- Field Health Overview -->
+    <div class="col-lg-7">
+      <div class="card-futuristic">
+        <div class="card-header glass-effect d-flex justify-content-between align-items-center">
+          <h5 class="mb-0"><i class="fas fa-leaf me-2 text-success"></i>Field Health Overview</h5>
+          <a href="{{ url_for('farms_list') }}" class="btn btn-sm btn-outline-success">All Farms</a>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-futuristic mb-0">
+              <thead>
+                <tr>
+                  <th>Field</th>
+                  <th>Crop / Stage</th>
+                  <th>Health</th>
+                  <th>Stress Factors</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if health_rows %}
+                  {% for row in health_rows %}
+                  <tr>
+                    <td>
+                      <div class="fw-bold">{{ row.name }}</div>
+                      <small class="text-muted">{{ row.farm_name }}</small>
+                    </td>
+                    <td>
+                      {% if row.crop_type %}
+                        <span class="badge bg-success">{{ row.crop_type }}</span><br>
+                        <small class="text-muted">{{ row.growth_stage }}</small>
+                      {% else %}<span class="text-muted">–</span>{% endif %}
+                    </td>
+                    <td>
+                      {% set hs = row.health_score or 0 %}
+                      <div class="fw-bold {% if hs >= 75 %}text-success{% elif hs >= 50 %}text-warning{% else %}text-danger{% endif %}">
+                        {{ "%.0f"|format(hs) }}%
+                      </div>
+                      <div class="progress-futuristic mt-1" style="height:5px;">
+                        <div class="progress-bar {% if hs >= 75 %}bg-success{% elif hs >= 50 %}bg-warning{% else %}bg-danger{% endif %}"
+                             style="width:{{ hs }}%"></div>
+                      </div>
+                    </td>
+                    <td>
+                      {% if row.heat_stress and row.heat_stress > 0.1 %}
+                        <span class="badge bg-danger me-1" title="Heat stress">🌡️ Heat</span>
+                      {% endif %}
+                      {% if row.frost_risk and row.frost_risk > 0.1 %}
+                        <span class="badge bg-info me-1" title="Frost risk">❄️ Frost</span>
+                      {% endif %}
+                      {% if row.drought_stress and row.drought_stress > 0.1 %}
+                        <span class="badge bg-warning me-1" title="Drought">🏜️ Drought</span>
+                      {% endif %}
+                      {% if row.excess_moisture and row.excess_moisture > 0.1 %}
+                        <span class="badge bg-primary me-1" title="Excess moisture">💧 Wet</span>
+                      {% endif %}
+                      {% if not (row.heat_stress or row.frost_risk or row.drought_stress or row.excess_moisture) %}
+                        <span class="text-muted small">–</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      <a href="{{ url_for('field_detail', field_id=row.field_id) }}"
+                         class="btn btn-sm btn-outline-info">View</a>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr><td colspan="5" class="text-center text-muted py-4">No fields registered yet.
+                    <a href="{{ url_for('add_farm') }}">Add a farm</a> to get started.
+                  </td></tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active Alerts -->
+    <div class="col-lg-5">
+      <div class="card-futuristic">
+        <div class="card-header glass-effect d-flex justify-content-between align-items-center">
+          <h5 class="mb-0"><i class="fas fa-bell me-2 text-warning"></i>Active Alerts</h5>
+          <a href="{{ url_for('agri_alerts_view') }}" class="btn btn-sm btn-outline-warning">View All</a>
+        </div>
+        <div class="card-body" style="max-height:360px;overflow-y:auto;">
+          {% if active_alerts %}
+            {% for alert in active_alerts %}
+            <div class="d-flex align-items-start mb-3 pb-3 border-bottom">
+              <div class="flex-shrink-0 me-2 mt-1">
+                {% if alert.severity == 'critical' %}
+                  <span class="badge bg-danger">CRITICAL</span>
+                {% elif alert.severity == 'high' %}
+                  <span class="badge bg-danger">HIGH</span>
+                {% elif alert.severity == 'medium' %}
+                  <span class="badge bg-warning text-dark">MED</span>
+                {% else %}
+                  <span class="badge bg-info">LOW</span>
+                {% endif %}
+              </div>
+              <div class="flex-grow-1">
+                <div class="small fw-bold">{{ alert.alert_type }}</div>
+                <div class="small text-muted">{{ alert.message }}</div>
+                <div class="text-muted" style="font-size:0.7rem;">
+                  {% if alert.field_name %}📍 {{ alert.field_name }} ·{% endif %}
+                  {{ alert.farm_name or '–' }}
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+            <div class="text-center text-muted py-4">
+              <i class="fas fa-check-circle fa-2x text-success mb-2"></i>
+              <p>No active alerts – all clear!</p>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Pending Irrigation -->
+    <div class="col-lg-5">
+      <div class="card-futuristic">
+        <div class="card-header glass-effect">
+          <h5 class="mb-0"><i class="fas fa-droplet me-2 text-info"></i>Pending Irrigation</h5>
+        </div>
+        <div class="card-body">
+          {% if pending_irrigation %}
+            {% for rec in pending_irrigation %}
+            <div class="d-flex align-items-center mb-2 pb-2 border-bottom">
+              <div class="me-3"><i class="fas fa-droplet fa-lg text-info"></i></div>
+              <div class="flex-grow-1">
+                <div class="fw-bold small">{{ rec.field_name }} <span class="text-muted">· {{ rec.farm_name }}</span></div>
+                <div class="text-info small">{{ rec.volume_mm }} mm · {{ rec.recommended_date }}</div>
+                <div class="text-muted" style="font-size:0.7rem;">{{ rec.reason }}</div>
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+            <p class="text-muted text-center py-3">No pending irrigation tasks.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- High Pest Risks -->
+    <div class="col-lg-4">
+      <div class="card-futuristic">
+        <div class="card-header glass-effect">
+          <h5 class="mb-0"><i class="fas fa-bug me-2 text-danger"></i>High Pest / Disease Risks</h5>
+        </div>
+        <div class="card-body">
+          {% if high_risks %}
+            {% for r in high_risks %}
+            <div class="d-flex align-items-start mb-2 pb-2 border-bottom">
+              <span class="badge bg-danger me-2 mt-1">HIGH</span>
+              <div>
+                <div class="fw-bold small">{{ r.pest_type }} <span class="text-muted">· {{ r.field_name }}</span></div>
+                <div class="text-muted" style="font-size:0.75rem;">{{ r.warning_message }}</div>
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+            <p class="text-muted text-center py-3">No high-risk pests detected.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Yield Forecasts -->
+    <div class="col-lg-3">
+      <div class="card-futuristic">
+        <div class="card-header glass-effect">
+          <h5 class="mb-0"><i class="fas fa-chart-bar me-2 text-primary"></i>Yield Forecast</h5>
+        </div>
+        <div class="card-body">
+          {% if yield_summary %}
+            {% for yf in yield_summary %}
+            <div class="mb-3">
+              <div class="d-flex justify-content-between small">
+                <span class="fw-bold">{{ yf.field_name }}</span>
+                <span class="badge bg-info">{{ yf.crop_type or '–' }}</span>
+              </div>
+              <div class="small">
+                <span class="text-success">{{ yf.expected_yield_ton_ha }} t/ha</span>
+                <span class="text-muted"> / target {{ yf.target_yield_ton_ha }} t/ha</span>
+              </div>
+              <div class="progress-futuristic mt-1" style="height:5px;">
+                {% set pct = [(yf.expected_yield_ton_ha / yf.target_yield_ton_ha * 100)|int, 100]|min %}
+                <div class="progress-bar bg-success" style="width:{{ pct }}%"></div>
+              </div>
+              <div class="text-muted" style="font-size:0.7rem;">
+                Confidence: {{ (yf.confidence * 100)|int }}%
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+            <p class="text-muted text-center py-3">No forecasts yet.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /row -->
+</div>
+{% endblock %}

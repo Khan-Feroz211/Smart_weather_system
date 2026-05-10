@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}Add Field – Smart AgriWeather{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width:700px;">
+
+  <div class="row mb-4">
+    <div class="col">
+      <h1 class="display-6 fw-bold text-glow mb-1">
+        <i class="fas fa-map-pin me-2 text-success"></i>Register Field &amp; Crop
+      </h1>
+      <p class="text-muted mb-0">Define field details and initial crop census</p>
+    </div>
+  </div>
+
+  <div class="card-futuristic">
+    <div class="card-body p-4">
+      <form method="POST" action="{{ url_for('add_field') }}">
+
+        <h6 class="text-info fw-bold mb-3 border-bottom pb-2">
+          <i class="fas fa-tractor me-1"></i> Farm &amp; Field Details
+        </h6>
+
+        <div class="mb-3">
+          <label class="form-label fw-bold">Farm</label>
+          <select name="farm_id" class="form-select glass-effect" required>
+            <option value="">— select farm —</option>
+            {% for farm in farms %}
+            <option value="{{ farm.farm_id }}"
+              {% if pre_farm_id and pre_farm_id|int == farm.farm_id %}selected{% endif %}>
+              {{ farm.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label class="form-label fw-bold">Field Name</label>
+            <input type="text" name="name" class="form-control glass-effect" required
+                   placeholder="e.g. North Field">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-bold">Area (hectares)</label>
+            <input type="number" step="0.1" name="area_ha" class="form-control glass-effect"
+                   required placeholder="5.0" min="0.1">
+          </div>
+        </div>
+
+        <div class="row g-3 mb-4">
+          <div class="col-md-6">
+            <label class="form-label fw-bold">Soil Type</label>
+            <select name="soil_type" class="form-select glass-effect">
+              <option>Loamy</option>
+              <option>Clay</option>
+              <option>Sandy Loam</option>
+              <option>Clay Loam</option>
+              <option>Silty Clay</option>
+              <option>Sandy</option>
+              <option>Silt Loam</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-bold">Irrigation Type</label>
+            <select name="irrigation_type" class="form-select glass-effect">
+              <option>Drip</option>
+              <option>Sprinkler</option>
+              <option>Furrow</option>
+              <option>Flood</option>
+              <option>Rainfed</option>
+            </select>
+          </div>
+        </div>
+
+        <h6 class="text-success fw-bold mb-3 border-bottom pb-2">
+          <i class="fas fa-seedling me-1"></i> Crop Census (optional)
+        </h6>
+
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label class="form-label fw-bold">Crop Type</label>
+            <select name="crop_type" class="form-select glass-effect">
+              <option value="">— none —</option>
+              <option>Wheat</option>
+              <option>Rice</option>
+              <option>Maize</option>
+              <option>Cotton</option>
+              <option>Sugarcane</option>
+              <option>Sunflower</option>
+              <option>Mungbean</option>
+              <option>Soybean</option>
+              <option>Tomato</option>
+              <option>Potato</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-bold">Growth Stage</label>
+            <select name="growth_stage" class="form-select glass-effect">
+              <option>Germination</option>
+              <option>Seedling</option>
+              <option>Tillering</option>
+              <option>Jointing</option>
+              <option>Heading</option>
+              <option>Flowering</option>
+              <option>Boll Formation</option>
+              <option>Grain Filling</option>
+              <option>Panicle Initiation</option>
+              <option>Ripening</option>
+              <option>Harvest Ready</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label class="form-label fw-bold">Planted Date</label>
+            <input type="date" name="planted_date" class="form-control glass-effect">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-bold">Expected Harvest Date</label>
+            <input type="date" name="expected_harvest_date" class="form-control glass-effect">
+          </div>
+        </div>
+
+        <div class="row g-3 mb-4">
+          <div class="col-md-6">
+            <label class="form-label fw-bold">Target Yield (t/ha)</label>
+            <input type="number" step="0.1" name="target_yield_ton_ha"
+                   class="form-control glass-effect" value="3.0" min="0">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-bold">Season</label>
+            <input type="text" name="season" class="form-control glass-effect"
+                   placeholder="e.g. Rabi 2025-26" value="Rabi 2025-26">
+          </div>
+        </div>
+
+        <div class="d-flex gap-2">
+          <button type="submit" class="btn btn-success btn-futuristic flex-grow-1">
+            <i class="fas fa-check me-1"></i> Register Field
+          </button>
+          <a href="{{ url_for('farms_list') }}" class="btn btn-outline-secondary flex-grow-1">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
