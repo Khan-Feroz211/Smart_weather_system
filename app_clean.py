@@ -1250,7 +1250,7 @@ def dismiss_agri_alert(alert_id):
         flash(f'Error: {e}', 'error')
     finally:
         conn.close()
-    return redirect(request.referrer or url_for('agri_alerts_view'))
+    return redirect(url_for('agri_alerts_view'))
 
 
 @app.route('/fields/<int:field_id>/refresh', methods=['POST'])
