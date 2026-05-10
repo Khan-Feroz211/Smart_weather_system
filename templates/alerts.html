@@ -68,7 +68,7 @@
                                 <small class="d-block mt-1">Action: {{ alert.recommended_action }}</small>
                                 <small>Confidence: {{ (alert.confidence * 100)|round(0) }}%</small>
                             </div>
-                            <small>{{ (alert.created_at or 'N/A')[:16] }}</small>
+                            <small>{{ alert.created_at[:16] if alert.created_at else 'N/A' }}</small>
                         </div>
                     </div>
                     {% endfor %}

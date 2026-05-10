@@ -52,6 +52,20 @@ recent_cleaned_by_location = defaultdict(lambda: deque(maxlen=24))
 
 SCHEMA_TABLE_WHITELIST = {'weather_data'}
 WEATHER_NUMERIC_FIELDS = {'temperature', 'humidity', 'pressure', 'wind_speed'}
+WEATHER_DATA_MIGRATION_COLUMNS = {
+    'sensor_id': 'TEXT',
+    'data_source': 'TEXT',
+    'sensor_timestamp': 'TEXT',
+    'quality_flags': 'TEXT',
+    'validation_score': 'REAL',
+    'quality_label': 'TEXT',
+    'cleaning_notes': 'TEXT',
+    'feature_blob': 'TEXT',
+    'decision_blob': 'TEXT',
+    'ingestion_mode': 'TEXT'
+}
+VALIDATION_PENALTY_PER_FLAG = 0.12
+KMH_TO_MPS = 0.277778
 
 class WeatherAI:
     def __init__(self):
@@ -200,16 +214,14 @@ def ensure_column_exists(conn, table_name, column_name, column_def):
     try:
         if table_name not in SCHEMA_TABLE_WHITELIST:
             raise ValueError(f"Unsupported table for migration: {table_name}")
-        if not column_name.replace('_', '').isalnum():
-            raise ValueError(f"Unsafe column name: {column_name}")
-        allowed_defs = {'TEXT', 'REAL', 'INTEGER', 'BOOLEAN'}
-        if column_def not in allowed_defs:
-            raise ValueError(f"Unsupported column definition: {column_def}")
+        expected_def = WEATHER_DATA_MIGRATION_COLUMNS.get(column_name)
+        if expected_def is None or expected_def != column_def:
+            raise ValueError(f"Unsupported migration for column: {column_name}")
 
-        existing = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        existing = conn.execute("PRAGMA table_info(weather_data)").fetchall()
         column_names = {col['name'] for col in existing}
         if column_name not in column_names:
-            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}")
+            conn.execute(f"ALTER TABLE weather_data ADD COLUMN {column_name} {column_def}")
     except Exception as e:
         print(f"Schema update warning ({table_name}.{column_name}): {e}")
 
@@ -332,7 +344,7 @@ def validate_sensor_data(sensor_record):
         finally:
             conn.close()
 
-    validation_score = max(0.0, 1.0 - (len(quality_flags) * 0.12))
+    validation_score = max(0.0, 1.0 - (len(quality_flags) * VALIDATION_PENALTY_PER_FLAG))
     return {
         'is_valid': len(quality_flags) == 0,
         'quality_flags': quality_flags,
@@ -344,17 +356,17 @@ def historical_field_average(location, field):
     """Get historical average for fallback imputation"""
     if field not in WEATHER_NUMERIC_FIELDS:
         return None
+    field_queries = {
+        'temperature': "SELECT AVG(temperature) as avg_value FROM weather_data WHERE location = ? AND temperature IS NOT NULL",
+        'humidity': "SELECT AVG(humidity) as avg_value FROM weather_data WHERE location = ? AND humidity IS NOT NULL",
+        'pressure': "SELECT AVG(pressure) as avg_value FROM weather_data WHERE location = ? AND pressure IS NOT NULL",
+        'wind_speed': "SELECT AVG(wind_speed) as avg_value FROM weather_data WHERE location = ? AND wind_speed IS NOT NULL"
+    }
     conn = get_db_connection()
     if not conn:
         return None
     try:
-        row = conn.execute(f'''
-            SELECT AVG({field}) as avg_value
-            FROM weather_data
-            WHERE location = ? AND {field} IS NOT NULL
-            ORDER BY recorded_at DESC
-            LIMIT 50
-        ''', (location,)).fetchone()
+        row = conn.execute(field_queries[field], (location,)).fetchone()
         return float(row['avg_value']) if row and row['avg_value'] is not None else None
     except Exception as e:
         print(f"Historical average warning ({field}): {e}")
@@ -390,7 +402,11 @@ def clean_sensor_data(validation_result):
             record[field] = max_value
             notes.append(f'clamped_high_{field}')
 
-    recent_series = [item['temperature'] for item in recent_cleaned_by_location[location] if 'temperature' in item]
+    recent_series = [
+        item['temperature']
+        for item in recent_cleaned_by_location[location]
+        if 'temperature' in item and item['temperature'] is not None
+    ]
     if len(recent_series) >= 5:
         median_temp = statistics.median(recent_series)
         if abs(record['temperature'] - median_temp) > 20:
@@ -399,7 +415,7 @@ def clean_sensor_data(validation_result):
             flags.append('outlier_temperature')
 
     if record['wind_speed'] > 70:
-        record['wind_speed'] = round(record['wind_speed'] * 0.277778, 2)
+        record['wind_speed'] = round(record['wind_speed'] * KMH_TO_MPS, 2)
         notes.append('wind_normalized_to_mps')
 
     record['condition'] = str(record.get('condition', 'Unknown')).title()
@@ -417,8 +433,8 @@ def engineer_features(cleaned_record, validation_result):
     sensor_dt = parse_sensor_timestamp(cleaned_record.get('timestamp'))
     recent_records = list(recent_cleaned_by_location[location])
 
-    temp_history = [item['temperature'] for item in recent_records if 'temperature' in item]
-    humidity_history = [item['humidity'] for item in recent_records if 'humidity' in item]
+    temp_history = [item['temperature'] for item in recent_records if 'temperature' in item and item['temperature'] is not None]
+    humidity_history = [item['humidity'] for item in recent_records if 'humidity' in item and item['humidity'] is not None]
     recent_temp_avg = statistics.mean(temp_history[-6:]) if temp_history else cleaned_record['temperature']
     recent_humidity_avg = statistics.mean(humidity_history[-6:]) if humidity_history else cleaned_record['humidity']
 
@@ -707,19 +723,7 @@ def init_database():
     for table in tables:
         cursor.execute(table)
 
-    weather_data_migrations = [
-        ('sensor_id', 'TEXT'),
-        ('data_source', 'TEXT'),
-        ('sensor_timestamp', 'TEXT'),
-        ('quality_flags', 'TEXT'),
-        ('validation_score', 'REAL'),
-        ('quality_label', 'TEXT'),
-        ('cleaning_notes', 'TEXT'),
-        ('feature_blob', 'TEXT'),
-        ('decision_blob', 'TEXT'),
-        ('ingestion_mode', 'TEXT')
-    ]
-    for column_name, column_def in weather_data_migrations:
+    for column_name, column_def in WEATHER_DATA_MIGRATION_COLUMNS.items():
         ensure_column_exists(conn, 'weather_data', column_name, column_def)
     
     # Insert sample data for demo
