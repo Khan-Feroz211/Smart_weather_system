@@ -423,3 +423,105 @@ function getWeatherIcon(condition) {
     };
     return icons[condition] || 'fa-cloud';
 }
+
+// ============================================================
+// AGRICULTURE MODULE JS
+// ============================================================
+
+/**
+ * Fetch live health data for a field and render it into the page
+ * (used on field_detail.html when the user clicks "Live Refresh")
+ */
+function loadLiveFieldHealth(fieldId) {
+    const url = `/api/agri/health/${fieldId}`;
+    fetch(url)
+        .then(r => r.json())
+        .then(data => {
+            const h = data.health;
+            if (!h) return;
+
+            // Health score bar
+            const bar = document.getElementById('live-health-bar');
+            const label = document.getElementById('live-health-label');
+            if (bar) {
+                bar.style.width = h.health_score + '%';
+                bar.className = 'progress-bar ' +
+                    (h.health_score >= 75 ? 'bg-success' :
+                     h.health_score >= 50 ? 'bg-warning' : 'bg-danger');
+            }
+            if (label) {
+                label.textContent = h.health_score.toFixed(0) + '%';
+                label.className = 'fw-bold ' +
+                    (h.health_score >= 75 ? 'text-success' :
+                     h.health_score >= 50 ? 'text-warning' : 'text-danger');
+            }
+
+            // Stress indicators
+            _setText('live-heat-stress',     (h.heat_stress * 100).toFixed(0) + '%');
+            _setText('live-frost-risk',      (h.frost_risk * 100).toFixed(0) + '%');
+            _setText('live-drought-stress',  (h.drought_stress * 100).toFixed(0) + '%');
+            _setText('live-excess-moisture', (h.excess_moisture * 100).toFixed(0) + '%');
+
+            // Pest risks list
+            const pestContainer = document.getElementById('live-pest-risks');
+            if (pestContainer && data.pest_risks) {
+                pestContainer.innerHTML = data.pest_risks.length
+                    ? data.pest_risks.map(r =>
+                        `<div class="d-flex align-items-start mb-2">
+                           <span class="pest-pill pest-pill-${r.risk_level} me-2">${r.risk_level.toUpperCase()}</span>
+                           <div><strong>${r.pest_type}</strong><br>
+                                <small class="text-muted">${r.warning_message}</small></div>
+                         </div>`).join('')
+                    : '<p class="text-muted">No pest risks detected.</p>';
+            }
+
+            // Irrigation
+            const irrEl = document.getElementById('live-irrigation');
+            if (irrEl) {
+                irrEl.innerHTML = data.irrigation
+                    ? `<span class="irrigation-badge">💧 ${data.irrigation.volume_mm} mm needed</span>
+                       <div class="text-muted small mt-1">${data.irrigation.reason}</div>`
+                    : '<span class="text-success small">No irrigation deficit.</span>';
+            }
+
+            // Yield forecast
+            const yf = data.yield_forecast;
+            if (yf) {
+                _setText('live-yield-expected',  yf.expected_yield_ton_ha + ' t/ha');
+                _setText('live-yield-gap',       yf.gap_ton_ha + ' t/ha gap');
+                _setText('live-yield-confidence', (yf.confidence * 100).toFixed(0) + '% confidence');
+            }
+        })
+        .catch(err => console.error('Live health fetch error:', err));
+}
+
+function _setText(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+}
+
+/**
+ * Colour-code all health-score cells on the page for the agri dashboard
+ */
+function colourHealthCells() {
+    document.querySelectorAll('[data-health-score]').forEach(el => {
+        const score = parseFloat(el.dataset.healthScore);
+        el.classList.remove('health-excellent', 'health-good', 'health-fair', 'health-poor');
+        if (score >= 80)      el.classList.add('health-excellent');
+        else if (score >= 65) el.classList.add('health-good');
+        else if (score >= 45) el.classList.add('health-fair');
+        else                  el.classList.add('health-poor');
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    colourHealthCells();
+
+    // Auto-refresh live health if we are on a field detail page
+    const fieldId = document.body.dataset.fieldId;
+    if (fieldId) {
+        loadLiveFieldHealth(fieldId);
+        // Refresh every 5 minutes
+        setInterval(() => loadLiveFieldHealth(fieldId), 300000);
+    }
+});

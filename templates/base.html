@@ -15,7 +15,7 @@
         <div class="container">
             <a class="navbar-brand text-glow" href="{{ url_for('dashboard') }}">
                 <i class="fas fa-cloud-sun me-2"></i>
-                <strong>Smart Weather AI</strong>
+                <strong>Smart AgriWeather</strong>
             </a>
             
             <!-- Connection Status -->
@@ -36,6 +36,15 @@
             <div class="navbar-nav ms-auto">
                 <a class="nav-link" href="{{ url_for('dashboard') }}">
                     <i class="fas fa-chart-line me-1"></i> Dashboard
+                </a>
+                <a class="nav-link" href="{{ url_for('agri_dashboard') }}">
+                    <i class="fas fa-seedling me-1"></i> Agriculture
+                </a>
+                <a class="nav-link" href="{{ url_for('farms_list') }}">
+                    <i class="fas fa-tractor me-1"></i> Farms
+                </a>
+                <a class="nav-link" href="{{ url_for('agri_alerts_view') }}">
+                    <i class="fas fa-triangle-exclamation me-1"></i> Agri Alerts
                 </a>
                 <a class="nav-link" href="{{ url_for('user_management') }}">
                     <i class="fas fa-users me-1"></i> Users
