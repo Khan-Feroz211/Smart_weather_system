@@ -204,19 +204,22 @@
         <div class="card-body">
           {% if pending_irrigation %}
             {% for rec in pending_irrigation %}
-            <div class="d-flex align-items-center mb-3 pb-3 border-bottom">
-              <div class="me-3">
-                <div class="bg-teal bg-opacity-10 p-2 rounded-circle">
-                  <i class="fas fa-droplet text-teal"></i>
+            <a href="{{ url_for('field_detail', field_id=rec.field_id) }}" class="text-decoration-none">
+              <div class="d-flex align-items-center mb-3 pb-3 border-bottom clickable-card">
+                <div class="me-3">
+                  <div class="bg-teal bg-opacity-10 p-2 rounded-circle">
+                    <i class="fas fa-droplet text-teal"></i>
+                  </div>
+                </div>
+                <div class="flex-grow-1">
+                  <div class="fw-bold">{{ rec.field_name }}</div>
+                  <div class="text-muted small">{{ rec.farm_name }}</div>
+                  <div class="text-teal">{{ rec.volume_mm }} mm needed</div>
+                  <div class="text-muted" style="font-size:0.75rem;">{{ rec.reason }}</div>
+                  <small class="text-muted">Click for details →</small>
                 </div>
               </div>
-              <div class="flex-grow-1">
-                <div class="fw-bold">{{ rec.field_name }}</div>
-                <div class="text-muted small">{{ rec.farm_name }}</div>
-                <div class="text-teal">{{ rec.volume_mm }} mm needed</div>
-                <div class="text-muted" style="font-size:0.75rem;">{{ rec.reason }}</div>
-              </div>
-            </div>
+            </a>
             {% endfor %}
           {% else %}
             <p class="text-muted text-center py-3">No pending irrigation tasks.</p>
@@ -234,11 +237,14 @@
         <div class="card-body">
           {% if high_risks %}
             {% for r in high_risks %}
-            <div class="stress-indicator stress-high mb-2">
-              <div class="fw-bold">{{ r.pest_type }}</div>
-              <div class="small">{{ r.field_name }}</div>
-              <div class="text-muted" style="font-size:0.75rem;">{{ r.warning_message }}</div>
-            </div>
+            <a href="{{ url_for('field_detail', field_id=r.field_id) }}" class="text-decoration-none">
+              <div class="stress-indicator stress-high mb-2 clickable-card">
+                <div class="fw-bold">{{ r.pest_type }}</div>
+                <div class="small">{{ r.field_name }}</div>
+                <div class="text-muted" style="font-size:0.75rem;">{{ r.warning_message }}</div>
+                <small class="text-muted">Click for details →</small>
+              </div>
+            </a>
             {% endfor %}
           {% else %}
             <p class="text-muted text-center py-3">No high-risk pests detected.</p>
@@ -256,23 +262,26 @@
         <div class="card-body">
           {% if yield_summary %}
             {% for yf in yield_summary %}
-            <div class="mb-3">
-              <div class="d-flex justify-content-between small">
-                <span class="fw-bold">{{ yf.field_name }}</span>
-                <span class="badge bg-teal">{{ yf.crop_type or '–' }}</span>
+            <a href="{{ url_for('field_detail', field_id=yf.field_id) }}" class="text-decoration-none">
+              <div class="mb-3 clickable-card">
+                <div class="d-flex justify-content-between small">
+                  <span class="fw-bold">{{ yf.field_name }}</span>
+                  <span class="badge bg-teal">{{ yf.crop_type or '–' }}</span>
+                </div>
+                <div class="small">
+                  <span class="text-teal">{{ yf.expected_yield_ton_ha }} t/ha</span>
+                  <span class="text-muted"> / target {{ yf.target_yield_ton_ha }} t/ha</span>
+                </div>
+                <div class="health-bar mt-1">
+                  {% set pct = [(yf.expected_yield_ton_ha / yf.target_yield_ton_ha * 100)|int, 100]|min %}
+                  <div class="health-bar-fill health-good" style="width:{{ pct }}%"></div>
+                </div>
+                <div class="text-muted" style="font-size:0.7rem;">
+                  Confidence: {{ (yf.confidence * 100)|int }}%
+                </div>
+                <small class="text-muted">Click for details →</small>
               </div>
-              <div class="small">
-                <span class="text-teal">{{ yf.expected_yield_ton_ha }} t/ha</span>
-                <span class="text-muted"> / target {{ yf.target_yield_ton_ha }} t/ha</span>
-              </div>
-              <div class="health-bar mt-1">
-                {% set pct = [(yf.expected_yield_ton_ha / yf.target_yield_ton_ha * 100)|int, 100]|min %}
-                <div class="health-bar-fill health-good" style="width:{{ pct }}%"></div>
-              </div>
-              <div class="text-muted" style="font-size:0.7rem;">
-                Confidence: {{ (yf.confidence * 100)|int }}%
-              </div>
-            </div>
+            </a>
             {% endfor %}
           {% else %}
             <p class="text-muted text-center py-3">No forecasts yet.</p>
@@ -281,6 +290,124 @@
       </div>
     </div>
 
+    <!-- Analytics Charts -->
+    <div class="col-lg-12 mt-4">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="mb-0"><i class="fas fa-chart-line me-2 text-primary"></i>Analytics Overview</h5>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-6 mb-4">
+              <h6 class="mb-3">Crop Health Trends</h6>
+              <canvas id="healthChart" height="200"></canvas>
+            </div>
+            <div class="col-md-6 mb-4">
+              <h6 class="mb-3">Yield Forecasts by Field</h6>
+              <canvas id="yieldChart" height="200"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /row -->
 </div>
+
+<script>
+// Analytics Charts
+document.addEventListener('DOMContentLoaded', function() {
+    // Crop Health Chart
+    const healthCtx = document.getElementById('healthChart');
+    if (healthCtx) {
+        const healthData = {{ health_rows|tojson }};
+        const fieldNames = healthData.map(r => r.name);
+        const healthScores = healthData.map(r => r.health_score || 0);
+        
+        new Chart(healthCtx, {
+            type: 'bar',
+            data: {
+                labels: fieldNames,
+                datasets: [{
+                    label: 'Crop Health Score',
+                    data: healthScores,
+                    backgroundColor: healthScores.map(score => 
+                        score >= 75 ? '#22c55e' : score >= 50 ? '#D97706' : '#ef4444'
+                    ),
+                    borderRadius: 8
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        ticks: {
+                            callback: function(value) {
+                                return value + '%';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    // Yield Forecast Chart
+    const yieldCtx = document.getElementById('yieldChart');
+    if (yieldCtx) {
+        const yieldData = {{ yield_summary|tojson }};
+        const fieldNames = yieldData.map(y => y.field_name);
+        const expectedYields = yieldData.map(y => y.expected_yield_ton_ha);
+        const targetYields = yieldData.map(y => y.target_yield_ton_ha);
+        
+        new Chart(yieldCtx, {
+            type: 'bar',
+            data: {
+                labels: fieldNames,
+                datasets: [
+                    {
+                        label: 'Expected Yield',
+                        data: expectedYields,
+                        backgroundColor: '#0d9488',
+                        borderRadius: 8
+                    },
+                    {
+                        label: 'Target Yield',
+                        data: targetYields,
+                        backgroundColor: '#064E3B',
+                        borderRadius: 8
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return value + ' t/ha';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+});
+</script>
 {% endblock %}

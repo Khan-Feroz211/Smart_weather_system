@@ -9,51 +9,75 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/agri-theme.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
 </head>
 <body>
     <!-- Navigation -->
-    <nav class="navbar navbar-expand-lg navbar-futuristic">
+    <nav class="navbar navbar-expand-lg navbar-primary">
         <div class="container">
-            <a class="navbar-brand text-glow" href="{{ url_for('dashboard') }}">
-                <i class="fas fa-cloud-sun me-2"></i>
+            <a class="navbar-brand text-white" href="{{ url_for('dashboard') }}">
+                <i class="fas fa-seedling me-2"></i>
                 <strong>Smart AgriWeather</strong>
             </a>
+            
+            <!-- Theme Toggle -->
+            <button class="btn btn-sm btn-outline-light me-3" id="theme-toggle" onclick="toggleTheme()">
+                <i class="fas fa-moon" id="theme-icon"></i>
+            </button>
             
             <!-- Connection Status -->
             <div class="navbar-text me-3">
                 <span class="live-indicator" id="connection-indicator" title="Connected"></span>
-                <small class="text-muted">LIVE</small>
+                <small class="text-white">LIVE</small>
             </div>
 
             <!-- Live DateTime -->
             <div class="navbar-text me-3">
-                <small>
+                <small class="text-white">
                     <i class="fas fa-clock me-1"></i>
                     <span id="live-date">{{ now.strftime('%A, %B %d, %Y') if now else '' }}</span> | 
                     <span id="live-clock" class="fw-bold">{{ now.strftime('%I:%M:%S %p') if now else '' }}</span>
                 </small>
             </div>
 
-            <div class="navbar-nav ms-auto">
-                <a class="nav-link" href="{{ url_for('dashboard') }}">
-                    <i class="fas fa-chart-line me-1"></i> Dashboard
-                </a>
-                <a class="nav-link" href="{{ url_for('agri_dashboard') }}">
-                    <i class="fas fa-seedling me-1"></i> Agriculture
-                </a>
-                <a class="nav-link" href="{{ url_for('farms_list') }}">
-                    <i class="fas fa-tractor me-1"></i> Farms
-                </a>
-                <a class="nav-link" href="{{ url_for('agri_alerts_view') }}">
-                    <i class="fas fa-triangle-exclamation me-1"></i> Agri Alerts
-                </a>
-                <a class="nav-link" href="{{ url_for('user_management') }}">
-                    <i class="fas fa-users me-1"></i> Users
-                </a>
-                <a class="nav-link" href="{{ url_for('weather_display') }}">
-                    <i class="fas fa-map-marker-alt me-1"></i> Weather
-                </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link text-white" href="{{ url_for('dashboard') }}">
+                            <i class="fas fa-chart-line me-1"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white" href="{{ url_for('agri_dashboard') }}">
+                            <i class="fas fa-seedling me-1"></i> Agriculture
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white" href="{{ url_for('farms_list') }}">
+                            <i class="fas fa-tractor me-1"></i> Farms
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white" href="{{ url_for('agri_alerts_view') }}">
+                            <i class="fas fa-triangle-exclamation me-1"></i> Agri Alerts
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white" href="{{ url_for('user_management') }}">
+                            <i class="fas fa-users me-1"></i> Users
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white" href="{{ url_for('weather_display') }}">
+                            <i class="fas fa-map-marker-alt me-1"></i> Weather
+                        </a>
+                    </li>
+                </ul>
             </div>
         </div>
     </nav>
@@ -82,6 +106,38 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    
+    <script>
+        // Theme Toggle Function
+        function toggleTheme() {
+            const html = document.documentElement;
+            const themeIcon = document.getElementById('theme-icon');
+            const currentTheme = html.getAttribute('data-bs-theme');
+            
+            if (currentTheme === 'light') {
+                html.setAttribute('data-bs-theme', 'dark');
+                themeIcon.classList.remove('fa-moon');
+                themeIcon.classList.add('fa-sun');
+                localStorage.setItem('theme', 'dark');
+            } else {
+                html.setAttribute('data-bs-theme', 'light');
+                themeIcon.classList.remove('fa-sun');
+                themeIcon.classList.add('fa-moon');
+                localStorage.setItem('theme', 'light');
+            }
+        }
+        
+        // Load saved theme on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-bs-theme', savedTheme);
+            const themeIcon = document.getElementById('theme-icon');
+            if (savedTheme === 'dark') {
+                themeIcon.classList.remove('fa-moon');
+                themeIcon.classList.add('fa-sun');
+            }
+        });
+    </script>
     
     {% block scripts %}{% endblock %}
 </body>

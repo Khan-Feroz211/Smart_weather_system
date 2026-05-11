@@ -455,3 +455,110 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--color-text-light);
 }
+
+/* Dark Mode Support */
+[data-bs-theme="dark"] {
+    --color-surface: #0f172a;
+    --color-surface-alt: #1e293b;
+    --color-text: #f1f5f9;
+    --color-text-muted: #94a3b8;
+    --color-text-light: #64748b;
+}
+
+[data-bs-theme="dark"] body {
+    background-color: var(--color-surface);
+    color: var(--color-text);
+}
+
+[data-bs-theme="dark"] .card {
+    background-color: var(--color-surface-alt);
+    color: var(--color-text);
+}
+
+[data-bs-theme="dark"] .card-header {
+    background-color: var(--color-surface);
+    border-bottom: 1px solid var(--color-text-light);
+}
+
+[data-bs-theme="dark"] .table {
+    color: var(--color-text);
+}
+
+[data-bs-theme="dark"] .table thead th {
+    background-color: var(--color-surface-alt);
+    color: var(--color-teal);
+}
+
+[data-bs-theme="dark"] .table tbody tr:hover {
+    background-color: var(--color-surface);
+}
+
+[data-bs-theme="dark"] .form-control {
+    background-color: var(--color-surface-alt);
+    border-color: var(--color-text-light);
+    color: var(--color-text);
+}
+
+[data-bs-theme="dark"] .form-control:focus {
+    background-color: var(--color-surface-alt);
+    border-color: var(--color-teal);
+    color: var(--color-text);
+}
+
+[data-bs-theme="dark"] .metric-card {
+    background: var(--color-surface-alt);
+    color: var(--color-text);
+}
+
+[data-bs-theme="dark"] .agri-stat-card {
+    background: var(--color-surface-alt);
+    color: var(--color-text);
+}
+
+[data-bs-theme="dark"] .dashboard-header {
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    color: white;
+}
+
+[data-bs-theme="dark"] .alert {
+    background-color: rgba(6, 78, 59, 0.2);
+    color: var(--color-text);
+}
+
+[data-bs-theme="dark"] .alert-success {
+    background-color: rgba(34, 197, 94, 0.2);
+    color: var(--color-success);
+}
+
+[data-bs-theme="dark"] .alert-warning {
+    background-color: rgba(217, 119, 6, 0.2);
+    color: var(--color-secondary);
+}
+
+[data-bs-theme="dark"] .alert-danger {
+    background-color: rgba(239, 68, 68, 0.2);
+    color: var(--color-danger);
+}
+
+[data-bs-theme="dark"] .alert-info {
+    background-color: rgba(59, 130, 246, 0.2);
+    color: var(--color-info);
+}
+
+/* Clickable Cards */
+.clickable-card {
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border-radius: 8px;
+    padding: 0.5rem;
+}
+
+.clickable-card:hover {
+    transform: translateX(5px);
+    background-color: var(--color-surface-alt);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+[data-bs-theme="dark"] .clickable-card:hover {
+    background-color: var(--color-surface);
+}
