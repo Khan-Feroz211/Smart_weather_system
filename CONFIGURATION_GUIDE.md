@@ -7,7 +7,6 @@ The system is now running at: **http://localhost:8000**
 ### Access Points
 - Dashboard: http://localhost:8000/dashboard
 - Agriculture Module: http://localhost:8000/agri
-- Farms List: http://localhost:8000/farms
 
 ---
 
@@ -18,15 +17,51 @@ The system is now running at: **http://localhost:8000**
 Located at: `d:\SWS\Smart_weather_system\.env`
 
 ```env
-SECRET_KEY=your_secret_key_here
-OPENWEATHER_API_KEY=your_openweather_api_key
+SECRET_KEY=smart_weather_system_secret_2024
+OPENWEATHER_API_KEY=demo_key_12345
 DEBUG=True
+SENSOR_MODE=simulation  # 'simulation' or 'real'
 ```
 
 **How to configure:**
 - `SECRET_KEY`: Flask session encryption key (generate a random string)
 - `OPENWEATHER_API_KEY`: Get from https://openweathermap.org/api
 - `DEBUG`: Set to `False` for production
+- `SENSOR_MODE`: Set to `simulation` (default) or `real` for actual sensors
+
+### Sensor Modes
+
+**Simulation Mode (Default)**
+- No hardware required
+- System generates realistic synthetic sensor data
+- Perfect for demonstrations and testing
+- Use when you don't have physical sensors yet
+
+**Real Sensor Mode**
+- Connect Arduino/ESP32 sensors via MQTT or HTTP
+- Requires physical hardware setup
+- See `ARDUINO_INTEGRATION_GUIDE.md` for details
+- Use when you have actual sensors installed
+
+**Switching Modes:**
+
+Via API:
+```bash
+# Get current mode
+curl http://localhost:8000/api/sensors/mode
+
+# Set to simulation
+curl -X POST http://localhost:8000/api/sensors/mode \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "simulation"}'
+
+# Set to real sensors
+curl -X POST http://localhost:8000/api/sensors/mode \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "real"}'
+```
+
+Or edit `.env` file and restart the application.
 
 ### 2. Docker Compose (`docker-compose.yml`)
 

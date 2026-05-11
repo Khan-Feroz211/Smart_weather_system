@@ -33,6 +33,7 @@ OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY', 'demo_key')
 OPENWEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
 SENSOR_GATEWAY_URL = os.environ.get('SENSOR_GATEWAY_URL', '').strip()
 SENSOR_STALE_MINUTES = int(os.environ.get('SENSOR_STALE_MINUTES', '15'))
+SENSOR_MODE = os.environ.get('SENSOR_MODE', 'simulation').lower()  # 'simulation' or 'real'
 
 # AI Model Storage
 MODEL_PATH = 'models/weather_model.joblib'
@@ -2271,19 +2272,88 @@ def initialize_app():
 # SENSOR INGESTION ROUTES
 # ============================================================
 
+@app.route('/api/sensors/mode', methods=['GET'])
+def get_sensor_mode():
+    """Get current sensor mode (simulation or real)"""
+    return jsonify({
+        'mode': SENSOR_MODE,
+        'description': 'simulation' if SENSOR_MODE == 'simulation' else 'real sensors via MQTT/HTTP'
+    })
+
+@app.route('/api/sensors/mode', methods=['POST'])
+def set_sensor_mode():
+    """Set sensor mode (simulation or real)"""
+    try:
+        data = request.json
+        mode = data.get('mode', 'simulation').lower()
+        
+        if mode not in ['simulation', 'real']:
+            return jsonify({'error': 'Invalid mode. Use "simulation" or "real"'}), 400
+        
+        # Update environment variable in .env file
+        import os as os_module
+        from pathlib import Path
+        
+        env_path = Path('.env')
+        if env_path.exists():
+            env_content = env_path.read_text()
+            # Update or add SENSOR_MODE line
+            if 'SENSOR_MODE=' in env_content:
+                lines = env_content.split('\n')
+                for i, line in enumerate(lines):
+                    if line.startswith('SENSOR_MODE='):
+                        lines[i] = f'SENSOR_MODE={mode}'
+                        break
+                env_content = '\n'.join(lines)
+            else:
+                env_content += f'\nSENSOR_MODE={mode}'
+            
+            env_path.write_text(env_content)
+        
+        # Update global variable
+        global SENSOR_MODE
+        SENSOR_MODE = mode
+        
+        # Restart sensor ingestion if running
+        if mode == 'simulation':
+            return jsonify({
+                'success': True,
+                'mode': mode,
+                'message': 'Switched to simulation mode. System will generate synthetic sensor data.'
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'mode': mode,
+                'message': 'Switched to real sensor mode. Connect your sensors via MQTT/HTTP.'
+            })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/sensors/ingest', methods=['POST'])
 def sensor_ingest():
     """Receive sensor data via HTTP (fallback for MQTT)"""
     try:
-        payload = request.json
-        if not payload:
-            return jsonify({'error': 'No payload provided'}), 400
-        
-        # Validate required fields
-        required = ['sensor_id', 'sensor_type', 'value', 'timestamp']
-        for field in required:
-            if field not in payload:
-                return jsonify({'error': f'Missing required field: {field}'}), 400
+        # Check if in simulation mode
+        if SENSOR_MODE == 'simulation':
+            from sensor_simulation import SensorSimulator
+            simulator = SensorSimulator()
+            reading = simulator.generate_sensor_reading(
+                request.json.get('sensor_type', 'soil_moisture'),
+                request.json.get('field_id', 1)
+            )
+            # Use simulated data instead of real sensor data
+            payload = reading
+        else:
+            payload = request.json
+            if not payload:
+                return jsonify({'error': 'No payload provided'}), 400
+            
+            # Validate required fields
+            required = ['sensor_id', 'sensor_type', 'value', 'timestamp']
+            for field in required:
+                if field not in payload:
+                    return jsonify({'error': f'Missing required field: {field}'}), 400
         
         # Import sensor ingestion components
         from sensor_ingestion import SensorValidator, SensorDatabase
