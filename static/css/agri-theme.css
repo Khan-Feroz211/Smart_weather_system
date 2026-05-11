@@ -20,9 +20,9 @@
     --color-surface-alt: #f1f5f9;
     
     /* Data Visualization - Bio-Teal */
-    --color-teal: #14B8A6;
+    --color-teal: #0d9488;
     --color-teal-light: #2dd4bf;
-    --color-teal-dark: #0d9488;
+    --color-teal-dark: #0f766e;
     
     /* Typography - Slate Ink */
     --color-text: #1E293B;
@@ -36,11 +36,13 @@
     --color-info: #3b82f6;
 }
 
-/* Base Styles */
+/* Typography */
 body {
     background-color: var(--color-surface);
     color: var(--color-text);
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
 }
 
 /* Primary Colors */
@@ -400,19 +402,20 @@ body {
     background: white;
     border-radius: 12px;
     padding: 1.25rem;
-    border-left: 4px solid var(--color-teal);
-    box-shadow: 0 2px 8px rgba(20, 184, 166, 0.1);
+    border-left: 4px solid var(--color-primary);
+    box-shadow: 0 2px 8px rgba(6, 78, 59, 0.1);
 }
 
 .agri-stat-value {
     font-size: 1.75rem;
     font-weight: 700;
-    color: var(--color-teal);
+    color: var(--color-primary);
 }
 
 .agri-stat-label {
-    color: var(--color-text-muted);
+    color: var(--color-text);
     font-size: 0.875rem;
+    font-weight: 500;
 }
 
 /* Responsive Design */

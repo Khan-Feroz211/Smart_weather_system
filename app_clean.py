@@ -958,9 +958,9 @@ def init_agriculture_database():
 
         # Demo irrigation recommendations
         irr_seed = [
-            (1, 2, '2026-05-11', 25.0, 'ET₀=28mm, rainfall=3mm, deficit=25mm',  0),
-            (2, 4, '2026-05-11', 30.0, 'ET₀=32mm, rainfall=2mm, deficit=30mm',  0),
-            (3, 3, '2026-05-12', 18.0, 'ET₀=20mm, rainfall=2mm, deficit=18mm',  0),
+            (1, 2, '2026-05-11', 25.0, 'Soil moisture below threshold - irrigation recommended',  0),
+            (2, 4, '2026-05-11', 30.0, 'High evapotranspiration rate detected',  0),
+            (3, 3, '2026-05-12', 18.0, 'Crop water stress indicator active',  0),
         ]
         for ir in irr_seed:
             cursor.execute('''INSERT OR IGNORE INTO irrigation_recommendations
