@@ -594,21 +594,22 @@ def evaluate_prediction_quality():
 
 def retrain_ai_with_recent_clean_data(hours=168):
     """Retrain AI model using recent cleaned weather data"""
-    conn = get_db_connection()
-    if not conn:
-        return
-    try:
-        locations = conn.execute('SELECT DISTINCT location FROM users').fetchall()
-        for row in locations:
-            location = row['location']
-            historical_data = get_historical_weather(location, hours)
-            if len(historical_data) >= 20:
-                weather_ai.train(historical_data)
-                break
-    except Exception as e:
-        print(f"Retrain warning: {e}")
-    finally:
-        conn.close()
+    with app.app_context():
+        conn = get_db_connection()
+        if not conn:
+            return
+        try:
+            locations = conn.execute('SELECT DISTINCT location FROM users').fetchall()
+            for row in locations:
+                location = row['location']
+                historical_data = get_historical_weather(location, hours)
+                if len(historical_data) >= 20:
+                    weather_ai.train(historical_data)
+                    break
+        except Exception as e:
+            print(f"Retrain warning: {e}")
+        finally:
+            conn.close()
 
 def process_weather_pipeline(location):
     """End-to-end sensor ingestion, validation, cleaning, feature, AI, and decision pipeline"""
@@ -731,20 +732,17 @@ def init_database():
         cursor.execute('''
             INSERT OR IGNORE INTO users (username, email, location, preferences)
             VALUES (?, ?, ?, ?)
-        ''', ('weather_lover', 'user@weather.com', 'London', json.dumps({
-            'preferred_activities': ['walking', 'cycling', 'reading'],
-            'temperature_range': [15, 25],
-            'avoid_rain': True,
-            'avoid_extreme_wind': True
+        ''', ('farm_owner', 'owner@agri.pk', 'Lahore', json.dumps({
+            'preferred_activities': ['farming', 'irrigation']
         })))
         
-        # Insert sample weather data for AI training
+        # Insert sample weather data for Pakistan cities
         sample_weather = [
-            ('London', 18.5, 65, 1013, 12, 'Cloudy', 0),
-            ('London', 20.1, 60, 1015, 8, 'Sunny', 0),
-            ('London', 16.8, 75, 1010, 15, 'Rainy', 5),
-            ('London', 22.3, 55, 1012, 10, 'Sunny', 0),
-            ('London', 19.7, 70, 1014, 18, 'Windy', 0)
+            ('Lahore', 32.5, 45, 1013, 12, 'Sunny', 0),
+            ('Islamabad', 28.1, 60, 1015, 8, 'Cloudy', 0),
+            ('Karachi', 35.8, 55, 1010, 15, 'Sunny', 5),
+            ('Peshawar', 30.3, 40, 1012, 10, 'Clear', 0),
+            ('Quetta', 25.7, 35, 1014, 18, 'Sunny', 0)
         ]
         
         for weather in sample_weather:
@@ -860,6 +858,37 @@ def init_agriculture_database():
             message TEXT NOT NULL,
             is_active BOOLEAN DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''',
+        '''CREATE TABLE IF NOT EXISTS raw_sensor_readings (
+            reading_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sensor_id TEXT NOT NULL,
+            sensor_type TEXT NOT NULL,
+            value REAL NOT NULL,
+            unit TEXT,
+            timestamp TEXT NOT NULL,
+            field_id INTEGER,
+            received_at TEXT NOT NULL,
+            raw_payload TEXT
+        )''',
+        '''CREATE TABLE IF NOT EXISTS validated_sensor_readings (
+            reading_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sensor_id TEXT NOT NULL,
+            sensor_type TEXT NOT NULL,
+            value REAL NOT NULL,
+            unit TEXT,
+            quality_score REAL DEFAULT 1.0,
+            validation_reason TEXT,
+            timestamp TEXT NOT NULL,
+            field_id INTEGER,
+            stored_at TEXT NOT NULL
+        )''',
+        '''CREATE TABLE IF NOT EXISTS sensor_health (
+            sensor_id TEXT PRIMARY KEY,
+            last_reading_at TEXT,
+            uptime_percentage REAL DEFAULT 100.0,
+            quality_score_avg REAL DEFAULT 1.0,
+            calibration_date TEXT,
+            status TEXT DEFAULT 'active'
         )'''
     ]
 
@@ -1301,42 +1330,43 @@ def refresh_field_data(field_id, location):
 # Real-time weather updates
 def update_weather_data():
     """Update weather data for all user locations"""
-    conn = get_db_connection()
-    if conn:
-        try:
-            locations = conn.execute('SELECT DISTINCT location FROM users').fetchall()
-            for location_row in locations:
-                location = location_row['location']
-                pipeline = process_weather_pipeline(location)
-                weather_data = pipeline['cleaned']
-                prediction = pipeline['prediction']
+    with app.app_context():
+        conn = get_db_connection()
+        if conn:
+            try:
+                locations = conn.execute('SELECT DISTINCT location FROM users').fetchall()
+                for location_row in locations:
+                    location = location_row['location']
+                    pipeline = process_weather_pipeline(location)
+                    weather_data = pipeline['cleaned']
+                    prediction = pipeline['prediction']
 
-                if not pipeline.get('skip_weather_storage'):
-                    store_weather_data(weather_data, pipeline_output=pipeline)
-                store_pipeline_log(pipeline)
-                update_sensor_quality_metrics(
-                    weather_data.get('sensor_id', f'sensor-{location}'),
-                    pipeline['validation'],
-                    weather_data
-                )
-                log_prediction_quality(location, weather_data.get('sensor_id', 'unknown'), prediction)
-                recent_cleaned_by_location[location].append(weather_data)
-                
-                # Send real-time update to connected clients
-                socketio.emit('weather_update', {
-                    'location': location,
-                    'data': weather_data,
-                    'prediction': prediction,
-                    'quality': pipeline['quality'],
-                    'decision': pipeline['decision'],
-                    'features': pipeline['features']
-                })
-                
-                print(f"📍 Weather updated for {location}: {weather_data['temperature']}°C")
-        except Exception as e:
-            print(f"Weather update error: {e}")
-        finally:
-            conn.close()
+                    if not pipeline.get('skip_weather_storage'):
+                        store_weather_data(weather_data, pipeline_output=pipeline)
+                    store_pipeline_log(pipeline)
+                    update_sensor_quality_metrics(
+                        weather_data.get('sensor_id', f'sensor-{location}'),
+                        pipeline['validation'],
+                        weather_data
+                    )
+                    log_prediction_quality(location, weather_data.get('sensor_id', 'unknown'), prediction)
+                    recent_cleaned_by_location[location].append(weather_data)
+
+                    # Send real-time update to connected clients
+                    socketio.emit('weather_update', {
+                        'location': location,
+                        'data': weather_data,
+                        'prediction': prediction,
+                        'quality': pipeline['quality'],
+                        'decision': pipeline['decision'],
+                        'features': pipeline['features']
+                    })
+
+                    print(f"📍 Weather updated for {location}: {weather_data['temperature']}°C")
+            except Exception as e:
+                print(f"Weather update error: {e}")
+            finally:
+                conn.close()
 
 # Scheduler for periodic tasks
 scheduler = BackgroundScheduler()
@@ -2166,7 +2196,7 @@ def handle_disconnect():
 @socketio.on('request_weather')
 def handle_weather_request(data):
     """Handle real-time weather requests"""
-    location = data.get('location', 'London')
+    location = data.get('location', 'Lahore')
     pipeline = process_weather_pipeline(location)
     weather_data = pipeline['cleaned']
     prediction = pipeline['prediction']
@@ -2226,15 +2256,548 @@ def initialize_app():
             weather_ai.train(historical_data)
     
     # Start scheduler for periodic updates
-    scheduler.add_job(update_weather_data, 'interval', minutes=2)
-    scheduler.add_job(lambda: retrain_ai_with_recent_clean_data(168), 'interval', hours=1)
-    scheduler.add_job(evaluate_prediction_quality, 'interval', minutes=10)
+    # Temporarily disabled to fix application context issues
+    # scheduler.add_job(lambda: update_weather_data(), 'interval', minutes=2)
+    # scheduler.add_job(lambda: retrain_ai_with_recent_clean_data(168), 'interval', hours=1)
+    # scheduler.add_job(lambda: evaluate_prediction_quality(), 'interval', minutes=10)
     
-    if not scheduler.running:
-        scheduler.start()
-        print("⏰ Scheduler started")
+    # if not scheduler.running:
+    #     scheduler.start()
+    #     print("⏰ Scheduler started")
     
     print("✅ Smart Weather System ready!")
+
+# ============================================================
+# SENSOR INGESTION ROUTES
+# ============================================================
+
+@app.route('/api/sensors/ingest', methods=['POST'])
+def sensor_ingest():
+    """Receive sensor data via HTTP (fallback for MQTT)"""
+    try:
+        payload = request.json
+        if not payload:
+            return jsonify({'error': 'No payload provided'}), 400
+        
+        # Validate required fields
+        required = ['sensor_id', 'sensor_type', 'value', 'timestamp']
+        for field in required:
+            if field not in payload:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        # Import sensor ingestion components
+        from sensor_ingestion import SensorValidator, SensorDatabase
+        
+        validator = SensorValidator()
+        db = SensorDatabase()
+        
+        # Validate reading
+        validation = validator.validate(
+            payload['sensor_type'],
+            float(payload['value']),
+            payload['sensor_id']
+        )
+        
+        # Store raw reading
+        db.store_raw_reading({
+            'sensor_id': payload['sensor_id'],
+            'sensor_type': payload['sensor_type'],
+            'value': float(payload['value']),
+            'unit': payload.get('unit'),
+            'timestamp': payload['timestamp'],
+            'field_id': payload.get('field_id')
+        })
+        
+        # Store validated reading if quality > 0
+        if validation['quality_score'] > 0:
+            db.store_validated_reading({
+                'sensor_id': payload['sensor_id'],
+                'sensor_type': payload['sensor_type'],
+                'value': float(payload['value']),
+                'unit': payload.get('unit'),
+                'timestamp': payload['timestamp'],
+                'field_id': payload.get('field_id')
+            }, validation)
+            db.update_sensor_health(payload['sensor_id'], validation['quality_score'])
+        
+        return jsonify({
+            'success': True,
+            'sensor_id': payload['sensor_id'],
+            'validation': validation
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sensors/health')
+def sensor_health_status():
+    """Get health status of all sensors"""
+    conn = get_db_connection()
+    try:
+        sensors = conn.execute('SELECT * FROM sensor_health ORDER BY last_reading_at DESC').fetchall()
+        return jsonify([dict(s) for s in sensors])
+    finally:
+        conn.close()
+
+@app.route('/api/sensors/readings/<sensor_type>')
+def sensor_readings(sensor_type):
+    """Get validated readings for a sensor type"""
+    conn = get_db_connection()
+    try:
+        field_id = request.args.get('field_id', type=int)
+        hours = request.args.get('hours', 24, type=int)
+        
+        query = '''
+            SELECT * FROM validated_sensor_readings
+            WHERE sensor_type = ?
+            AND timestamp >= datetime('now', '-{} hours')
+        '''.format(hours)
+        
+        params = [sensor_type]
+        if field_id:
+            query += ' AND field_id = ?'
+            params.append(field_id)
+        
+        query += ' ORDER BY timestamp DESC LIMIT 1000'
+        
+        readings = conn.execute(query, params).fetchall()
+        return jsonify([dict(r) for r in readings])
+    finally:
+        conn.close()
+
+@app.route('/api/sensors/export')
+def sensor_data_export():
+    """Export sensor data for research (CSV/JSON/Parquet)"""
+    conn = get_db_connection()
+    try:
+        format_type = request.args.get('format', 'csv')
+        sensor_type = request.args.get('sensor_type')
+        hours = request.args.get('hours', 168, type=int)  # Default 7 days
+        
+        query = '''
+            SELECT * FROM validated_sensor_readings
+            WHERE timestamp >= datetime('now', '-{} hours')
+        '''.format(hours)
+        
+        params = []
+        if sensor_type:
+            query += ' AND sensor_type = ?'
+            params.append(sensor_type)
+        
+        query += ' ORDER BY timestamp DESC'
+        
+        readings = conn.execute(query, params).fetchall()
+        
+        if format_type == 'csv':
+            import csv
+            from io import StringIO
+            output = StringIO()
+            writer = csv.DictWriter(output, fieldnames=[r[0] for r in conn.description])
+            writer.writeheader()
+            writer.writerows([dict(r) for r in readings])
+            response = Response(output.getvalue(), mimetype='text/csv')
+            response.headers['Content-Disposition'] = 'attachment; filename=sensor_data.csv'
+            return response
+        else:
+            return jsonify([dict(r) for r in readings])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+# ============================================================
+# DATA PROCESSING ROUTES
+# ============================================================
+
+@app.route('/api/processing/clean/<sensor_type>')
+def clean_sensor_data(sensor_type):
+    """Clean and validate sensor data with anomaly detection"""
+    from data_processing import DataProcessingPipeline
+    
+    try:
+        field_id = request.args.get('field_id', type=int)
+        hours = request.args.get('hours', 168, type=int)
+        
+        pipeline = DataProcessingPipeline()
+        result = pipeline.process_sensor_data(sensor_type, field_id, hours)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/processing/field/<int:field_id>')
+def process_field_data(field_id):
+    """Process all sensor data for a field"""
+    from data_processing import DataProcessingPipeline
+    
+    try:
+        hours = request.args.get('hours', 168, type=int)
+        
+        pipeline = DataProcessingPipeline()
+        results = pipeline.process_all_field_sensors(field_id, hours)
+        
+        return jsonify({
+            'success': True,
+            'field_id': field_id,
+            'sensor_results': results
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/processing/quality/<int:field_id>')
+def field_data_quality(field_id):
+    """Get data quality scores for all sensors in a field"""
+    from data_processing import DataProcessingPipeline, DataQualityScorer
+    
+    try:
+        pipeline = DataProcessingPipeline()
+        quality_scores = {}
+        
+        sensor_types = ['soil_moisture', 'soil_temperature', 'air_temperature', 'air_humidity']
+        
+        for sensor_type in sensor_types:
+            df = pipeline.get_validated_sensor_data(sensor_type, field_id, hours=168)
+            if len(df) > 0:
+                quality_scores[sensor_type] = DataQualityScorer.compute_overall_quality_score(df, sensor_type)
+        
+        return jsonify({
+            'success': True,
+            'field_id': field_id,
+            'quality_scores': quality_scores
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/processing/features/gdd')
+def calculate_gdd():
+    """Calculate Growing Degree Days from temperature data"""
+    from data_processing import FeatureEngineer
+    
+    try:
+        field_id = request.args.get('field_id', type=int)
+        hours = request.args.get('hours', 168, type=int)
+        base_temp = request.args.get('base_temp', 10.0, type=float)
+        
+        from data_processing import DataProcessingPipeline
+        pipeline = DataProcessingPipeline()
+        
+        # Fetch temperature data
+        df = pipeline.get_validated_sensor_data('air_temperature', field_id, hours)
+        
+        if len(df) == 0:
+            return jsonify({'success': False, 'message': 'No temperature data available'})
+        
+        temperatures = df['value'].tolist()
+        gdd = FeatureEngineer.calculate_growing_degree_days(temperatures, base_temp)
+        
+        return jsonify({
+            'success': True,
+            'growing_degree_days': round(gdd, 2),
+            'base_temperature': base_temp,
+            'data_points': len(temperatures)
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/processing/features/et')
+def calculate_et():
+    """Calculate reference evapotranspiration using Penman-Monteith"""
+    from data_processing import FeatureEngineer
+    
+    try:
+        field_id = request.args.get('field_id', type=int)
+        
+        conn = get_db_connection()
+        try:
+            # Fetch latest sensor readings
+            readings = conn.execute('''
+                SELECT sensor_type, value FROM validated_sensor_readings
+                WHERE field_id = ?
+                AND timestamp >= datetime('now', '-1 hour')
+                GROUP BY sensor_type
+            ''', (field_id,)).fetchall()
+            
+            sensor_dict = {row['sensor_type']: row['value'] for row in readings}
+            
+            et = FeatureEngineer.calculate_evapotranspiration_penman_monteith(
+                temperature=sensor_dict.get('air_temperature', 20.0),
+                humidity=sensor_dict.get('air_humidity', 50.0),
+                wind_speed=sensor_dict.get('wind_speed', 5.0),
+                solar_radiation=sensor_dict.get('solar_radiation', 200.0),
+                pressure=1013.0
+            )
+            
+            return jsonify({
+                'success': True,
+                'evapotranspiration_mm_day': round(et, 2),
+                'sensor_data': sensor_dict
+            })
+        finally:
+            conn.close()
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/processing/features/stress')
+def calculate_stress_indices():
+    """Calculate stress indices from sensor data"""
+    from data_processing import FeatureEngineer
+    
+    try:
+        field_id = request.args.get('field_id', type=int)
+        
+        conn = get_db_connection()
+        try:
+            readings = conn.execute('''
+                SELECT sensor_type, value FROM validated_sensor_readings
+                WHERE field_id = ?
+                AND timestamp >= datetime('now', '-1 hour')
+                GROUP BY sensor_type
+            ''', (field_id,)).fetchall()
+            
+            sensor_dict = {row['sensor_type']: row['value'] for row in readings}
+            
+            stress_indices = FeatureEngineer.calculate_stress_indices(sensor_dict)
+            
+            return jsonify({
+                'success': True,
+                'stress_indices': stress_indices,
+                'sensor_data': sensor_dict
+            })
+        finally:
+            conn.close()
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ============================================================
+# CROP FAILURE PREDICTION ROUTES
+# ============================================================
+
+@app.route('/api/prediction/failure/<int:field_id>')
+def predict_crop_failure(field_id):
+    """Predict crop failure probability with confidence intervals"""
+    from crop_failure_predictor import CropFailureService
+    
+    try:
+        service = CropFailureService()
+        result = service.predict_crop_failure(field_id)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/prediction/train')
+def train_crop_failure_model():
+    """Train crop failure prediction model (with synthetic data for demo)"""
+    from crop_failure_predictor import CropFailureService
+    
+    try:
+        service = CropFailureService()
+        success = service.train_model_with_synthetic_data()
+        
+        return jsonify({
+            'success': success,
+            'model_metadata': service.predictor.training_metadata
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/prediction/explain/<int:field_id>')
+def explain_crop_failure_prediction(field_id):
+    """Explain crop failure prediction using SHAP values"""
+    from crop_failure_predictor import CropFailureService
+    
+    try:
+        service = CropFailureService()
+        
+        # Get sensor data
+        sensor_data = service.get_sensor_data_for_field(field_id)
+        crop_info = service.get_crop_info_for_field(field_id)
+        
+        if not sensor_data or not crop_info:
+            return jsonify({'success': False, 'error': 'Insufficient data for explanation'})
+        
+        # Prepare features
+        features = service.predictor.prepare_features(sensor_data, crop_info)
+        
+        # Explain
+        explanation = service.predictor.explain_prediction(features)
+        
+        return jsonify({
+            'success': True,
+            'field_id': field_id,
+            'explanation': explanation,
+            'feature_names': service.predictor.feature_names
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ============================================================
+# TREND VISUALIZATION ROUTES
+# ============================================================
+
+@app.route('/api/visualization/trend/historical/<sensor_type>')
+def visualize_historical_trend(sensor_type):
+    """Generate historical trend chart for sensor data"""
+    from trend_visualization import TrendVisualizer
+    
+    try:
+        field_id = request.args.get('field_id', type=int)
+        hours = request.args.get('hours', 720, type=int)  # Default 30 days
+        
+        visualizer = TrendVisualizer()
+        result = visualizer.generate_historical_trend(sensor_type, field_id, hours)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/visualization/trend/forecast/<sensor_type>')
+def visualize_forecast_trend(sensor_type):
+    """Generate forecast trend chart with uncertainty bands"""
+    from trend_visualization import TrendVisualizer
+    
+    try:
+        field_id = request.args.get('field_id', type=int)
+        forecast_hours = request.args.get('forecast_hours', 168, type=int)  # Default 7 days
+        
+        visualizer = TrendVisualizer()
+        result = visualizer.generate_forecast_trend(sensor_type, field_id, forecast_hours)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/visualization/trend/health/<int:field_id>')
+def visualize_health_trend(field_id):
+    """Generate crop health trend chart"""
+    from trend_visualization import TrendVisualizer
+    
+    try:
+        hours = request.args.get('hours', 720, type=int)
+        
+        visualizer = TrendVisualizer()
+        result = visualizer.generate_health_trend(field_id, hours)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/visualization/trend/yield/<int:field_id>')
+def visualize_yield_forecast(field_id):
+    """Generate yield forecast trend chart"""
+    from trend_visualization import TrendVisualizer
+    
+    try:
+        visualizer = TrendVisualizer()
+        result = visualizer.generate_yield_forecast_trend(field_id)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/visualization/trend/comparative')
+def visualize_comparative_trend():
+    """Generate comparative trend chart for multiple sensor types"""
+    from trend_visualization import TrendVisualizer
+    
+    try:
+        field_id = request.args.get('field_id', type=int)
+        hours = request.args.get('hours', 168, type=int)
+        sensor_types = request.args.getlist('sensor_types')
+        
+        if not sensor_types:
+            sensor_types = ['soil_moisture', 'air_temperature', 'air_humidity']
+        
+        visualizer = TrendVisualizer()
+        result = visualizer.generate_comparative_trend(sensor_types, field_id, hours)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ============================================================
+# EXPERIMENT TRACKING ROUTES
+# ============================================================
+
+@app.route('/api/experiments/start', methods=['POST'])
+def start_experiment():
+    """Start a new ML experiment"""
+    from experiment_tracking import ExperimentTracker
+    
+    try:
+        data = request.json
+        tracker = ExperimentTracker()
+        
+        exp_id = tracker.start_experiment(
+            experiment_name=data.get('experiment_name'),
+            model_type=data.get('model_type'),
+            description=data.get('description'),
+            tags=data.get('tags'),
+            parameters=data.get('parameters')
+        )
+        
+        return jsonify({'success': True, 'experiment_id': exp_id})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/experiments/<experiment_id>/metrics', methods=['POST'])
+def log_experiment_metrics(experiment_id):
+    """Log metrics for an experiment"""
+    from experiment_tracking import ExperimentTracker
+    
+    try:
+        data = request.json
+        tracker = ExperimentTracker()
+        
+        tracker.log_metrics(experiment_id, data.get('metrics'))
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/experiments/<experiment_id>/end', methods=['POST'])
+def end_experiment(experiment_id):
+    """End an experiment"""
+    from experiment_tracking import ExperimentTracker
+    
+    try:
+        data = request.json
+        tracker = ExperimentTracker()
+        
+        tracker.end_experiment(experiment_id, status=data.get('status', 'completed'))
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/experiments')
+def list_experiments():
+    """List all experiments"""
+    from experiment_tracking import ExperimentTracker
+    
+    try:
+        model_type = request.args.get('model_type')
+        status = request.args.get('status')
+        limit = request.args.get('limit', 50, type=int)
+        
+        tracker = ExperimentTracker()
+        experiments = tracker.list_experiments(model_type, status, limit)
+        
+        return jsonify({'success': True, 'experiments': experiments})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/experiments/<experiment_id>')
+def get_experiment(experiment_id):
+    """Get experiment details"""
+    from experiment_tracking import ExperimentTracker
+    
+    try:
+        tracker = ExperimentTracker()
+        experiment = tracker.get_experiment(experiment_id)
+        
+        return jsonify({'success': True, 'experiment': experiment})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # Shutdown handler
 def shutdown_app():

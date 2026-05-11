@@ -121,7 +121,7 @@ class WeatherSystem {
 
     loadInitialWeather() {
         // Request initial weather data for default location
-        this.socket.emit('request_weather', { location: 'London' });
+        this.socket.emit('request_weather', { location: 'Lahore' });
         
         // Load user locations if available
         const userLocations = this.getUserLocations();
@@ -132,7 +132,7 @@ class WeatherSystem {
 
     getUserLocations() {
         // This would typically come from your user data
-        return ['London', 'New York', 'Tokyo'];
+        return ['Lahore', 'Islamabad', 'Karachi', 'Peshawar', 'Quetta'];
     }
 
     setupPeriodicUpdates() {
@@ -196,7 +196,7 @@ class WeatherSystem {
         }
         
         // Update dashboard if this is the primary location
-        if (data.location === 'London') {
+        if (data.location === 'Lahore') {
             this.updateDashboardWeather(data);
         }
     }

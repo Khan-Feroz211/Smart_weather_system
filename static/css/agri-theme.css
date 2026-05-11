@@ -1,0 +1,454 @@
+/**
+ * Agri-Science Color Palette
+ * Research-Grade Agriculture System Theme
+ */
+
+/* Color Variables */
+:root {
+    /* Primary - Deep Forest */
+    --color-primary: #064E3B;
+    --color-primary-light: #0a6b52;
+    --color-primary-dark: #043a2c;
+    
+    /* Secondary - Safety Amber */
+    --color-secondary: #D97706;
+    --color-secondary-light: #f59e0b;
+    --color-secondary-dark: #b45309;
+    
+    /* Surface - Clinical White */
+    --color-surface: #F8FAFC;
+    --color-surface-alt: #f1f5f9;
+    
+    /* Data Visualization - Bio-Teal */
+    --color-teal: #14B8A6;
+    --color-teal-light: #2dd4bf;
+    --color-teal-dark: #0d9488;
+    
+    /* Typography - Slate Ink */
+    --color-text: #1E293B;
+    --color-text-muted: #64748b;
+    --color-text-light: #94a3b8;
+    
+    /* Status Colors */
+    --color-success: #22c55e;
+    --color-warning: #D97706;
+    --color-danger: #ef4444;
+    --color-info: #3b82f6;
+}
+
+/* Base Styles */
+body {
+    background-color: var(--color-surface);
+    color: var(--color-text);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* Primary Colors */
+.bg-primary {
+    background-color: var(--color-primary) !important;
+}
+
+.text-primary {
+    color: var(--color-primary) !important;
+}
+
+.btn-primary {
+    background-color: var(--color-primary);
+    border-color: var(--color-primary);
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: var(--color-primary-light);
+    border-color: var(--color-primary-light);
+}
+
+/* Secondary Colors */
+.bg-secondary {
+    background-color: var(--color-secondary) !important;
+}
+
+.text-secondary {
+    color: var(--color-secondary) !important;
+}
+
+.btn-secondary {
+    background-color: var(--color-secondary);
+    border-color: var(--color-secondary);
+    color: white;
+}
+
+.btn-secondary:hover {
+    background-color: var(--color-secondary-light);
+    border-color: var(--color-secondary-light);
+}
+
+/* Surface Colors */
+.bg-surface {
+    background-color: var(--color-surface) !important;
+}
+
+.bg-surface-alt {
+    background-color: var(--color-surface-alt) !important;
+}
+
+/* Teal Colors */
+.bg-teal {
+    background-color: var(--color-teal) !important;
+}
+
+.text-teal {
+    color: var(--color-teal) !important;
+}
+
+/* Card Styles */
+.card {
+    background-color: white;
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(6, 78, 59, 0.08);
+    transition: all 0.3s ease;
+}
+
+.card:hover {
+    box-shadow: 0 4px 16px rgba(6, 78, 59, 0.12);
+    transform: translateY(-2px);
+}
+
+.card-header {
+    background-color: var(--color-surface);
+    border-bottom: 1px solid var(--color-surface-alt);
+    border-radius: 12px 12px 0 0 !important;
+    padding: 1rem 1.5rem;
+}
+
+.card-title {
+    color: var(--color-primary);
+    font-weight: 600;
+}
+
+/* Navigation */
+.navbar {
+    background-color: var(--color-primary) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.navbar-brand {
+    color: white !important;
+    font-weight: 700;
+    font-size: 1.5rem;
+}
+
+.nav-link {
+    color: rgba(255, 255, 255, 0.9) !important;
+    transition: color 0.3s ease;
+}
+
+.nav-link:hover {
+    color: white !important;
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Buttons */
+.btn {
+    border-radius: 8px;
+    padding: 0.625rem 1.25rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.btn-success {
+    background-color: var(--color-success);
+    border-color: var(--color-success);
+}
+
+.btn-warning {
+    background-color: var(--color-secondary);
+    border-color: var(--color-secondary);
+}
+
+.btn-danger {
+    background-color: var(--color-danger);
+    border-color: var(--color-danger);
+}
+
+/* Forms */
+.form-control {
+    border: 1px solid var(--color-surface-alt);
+    border-radius: 8px;
+    padding: 0.625rem 0.875rem;
+    transition: border-color 0.3s ease;
+}
+
+.form-control:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(6, 78, 59, 0.1);
+}
+
+/* Tables */
+.table {
+    color: var(--color-text);
+}
+
+.table thead th {
+    background-color: var(--color-surface);
+    color: var(--color-primary);
+    font-weight: 600;
+    border-bottom: 2px solid var(--color-primary);
+}
+
+.table tbody tr:hover {
+    background-color: var(--color-surface);
+}
+
+/* Alerts */
+.alert {
+    border-radius: 8px;
+    border: none;
+}
+
+.alert-success {
+    background-color: rgba(34, 197, 94, 0.1);
+    color: var(--color-success);
+    border-left: 4px solid var(--color-success);
+}
+
+.alert-warning {
+    background-color: rgba(217, 119, 6, 0.1);
+    color: var(--color-secondary);
+    border-left: 4px solid var(--color-secondary);
+}
+
+.alert-danger {
+    background-color: rgba(239, 68, 68, 0.1);
+    color: var(--color-danger);
+    border-left: 4px solid var(--color-danger);
+}
+
+/* Status Indicators */
+.status-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.status-success {
+    background-color: rgba(34, 197, 94, 0.2);
+    color: var(--color-success);
+}
+
+.status-warning {
+    background-color: rgba(217, 119, 6, 0.2);
+    color: var(--color-secondary);
+}
+
+.status-danger {
+    background-color: rgba(239, 68, 68, 0.2);
+    color: var(--color-danger);
+}
+
+/* Progress Bars */
+.progress {
+    background-color: var(--color-surface-alt);
+    border-radius: 9999px;
+    height: 8px;
+}
+
+.progress-bar {
+    background-color: var(--color-teal);
+    border-radius: 9999px;
+}
+
+/* Health Score Bar */
+.health-bar {
+    height: 12px;
+    border-radius: 6px;
+    background-color: var(--color-surface-alt);
+    overflow: hidden;
+}
+
+.health-bar-fill {
+    height: 100%;
+    transition: width 0.5s ease;
+    border-radius: 6px;
+}
+
+.health-excellent {
+    background: linear-gradient(90deg, var(--color-teal), var(--color-success));
+}
+
+.health-good {
+    background: linear-gradient(90deg, var(--color-teal-light), var(--color-teal));
+}
+
+.health-fair {
+    background: linear-gradient(90deg, var(--color-secondary-light), var(--color-secondary));
+}
+
+.health-poor {
+    background: linear-gradient(90deg, var(--color-danger), #ef4444);
+}
+
+/* Metric Cards */
+.metric-card {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 8px rgba(6, 78, 59, 0.08);
+    border-left: 4px solid var(--color-primary);
+    transition: all 0.3s ease;
+}
+
+.metric-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 4px 16px rgba(6, 78, 59, 0.12);
+}
+
+.metric-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--color-primary);
+}
+
+.metric-label {
+    color: var(--color-text-muted);
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Dashboard Header */
+.dashboard-header {
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    color: white;
+    padding: 2rem;
+    border-radius: 12px;
+    margin-bottom: 2rem;
+}
+
+.dashboard-header h1 {
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+}
+
+.dashboard-header p {
+    color: rgba(255, 255, 255, 0.9);
+    margin: 0;
+}
+
+/* Live Indicator */
+.live-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.75rem;
+    background-color: rgba(34, 197, 94, 0.2);
+    color: var(--color-success);
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.live-dot {
+    width: 8px;
+    height: 8px;
+    background-color: var(--color-success);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+/* Stress Indicators */
+.stress-indicator {
+    padding: 0.5rem;
+    border-radius: 8px;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.stress-low {
+    background-color: rgba(34, 197, 94, 0.1);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    color: var(--color-success);
+}
+
+.stress-medium {
+    background-color: rgba(217, 119, 6, 0.1);
+    border: 1px solid rgba(217, 119, 6, 0.3);
+    color: var(--color-secondary);
+}
+
+.stress-high {
+    background-color: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: var(--color-danger);
+}
+
+/* Agriculture Dashboard Specific */
+.agri-stat-card {
+    background: white;
+    border-radius: 12px;
+    padding: 1.25rem;
+    border-left: 4px solid var(--color-teal);
+    box-shadow: 0 2px 8px rgba(20, 184, 166, 0.1);
+}
+
+.agri-stat-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--color-teal);
+}
+
+.agri-stat-label {
+    color: var(--color-text-muted);
+    font-size: 0.875rem;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .dashboard-header {
+        padding: 1.5rem;
+    }
+    
+    .metric-card {
+        padding: 1rem;
+    }
+    
+    .metric-value {
+        font-size: 1.5rem;
+    }
+    
+    .card {
+        border-radius: 8px;
+    }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--color-surface);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--color-surface-alt);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-light);
+}
