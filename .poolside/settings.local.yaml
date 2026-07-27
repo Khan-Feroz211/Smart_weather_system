@@ -1,0 +1,28 @@
+tools:
+    shell:
+        allow:
+            - cd *
+            - git status
+            - echo *
+            - git branch *
+            - git remote *
+            - ls *
+            - find *
+            - pwd
+            - python *
+            - where python3
+            - where py
+            - .venv\Scripts\python.exe *
+            - cat *
+            - Select-Object *
+            - file *
+            - Get-Command py *
+            - Get-Command python3 *
+            - py *
+            - Get-ChildItem *
+            - git log *
+            - mkdir *
+            - Remove-Item *
+            - git diff *
+            - git status *
+            - git add *

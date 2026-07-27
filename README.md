@@ -1,10 +1,7 @@
 # 🌦️ Smart Weather System
 
-## Participants 
- 1. Feroz Ujjan   F24605023
- 2. Hansain Ali   F24605030
- 3. Hassan Naseer F24605021
- 4. Ali Naqi      F24605014
+## Author
+ Feroz U Din
 
 
 A real-time, AI-powered weather monitoring and prediction system built with Flask, Socket.IO, and Machine Learning. This intelligent system provides live weather updates, personalized alerts, activity recommendations, and accurate weather predictions using advanced AI algorithms.
@@ -31,6 +28,70 @@ A real-time, AI-powered weather monitoring and prediction system built with Flas
 - [Troubleshooting](#-troubleshooting)
 - [Contributing](#-contributing)
 - [License](#-license)
+- [Edge-Case Hardening](#-edge-case-hardening)
+
+---
+
+## 🛡️ Edge-Case Hardening
+
+The system implements comprehensive edge-case hardening across 7 modules to
+ensure it fails safely, communicates uncertainty honestly, and degrades
+gracefully under real-world conditions of rural Pakistan (patchy connectivity,
+sparse sensors, multilingual low-literacy users, high-stakes disaster alerts).
+
+### Modules
+
+| # | Module | Key Hardening |
+|---|--------|--------------|
+| 1 | **Geospatial & Weather Ingestion** | Coordinate sanity checks, stale-data cache fallback, circuit breakers, grid-cell confidence metadata |
+| 2 | **Satellite & IoT Sensing** | Cloud-obscured NDVI detection, sensor health scoring, 4-tier fallback chain |
+| 3 | **NDMA Disaster Alerts** | Alert deduplication with severity escalation, multi-channel delivery (push→SMS), pre-translated templates (Urdu/Sindhi/Pashto/Saraiki/Balochi), audit logging |
+| 4 | **AI/ML Stack** | Out-of-distribution detection, regional data-density checks, water-sustainability penalties, cold-start policy |
+| 5 | **Feedback & Self-Improvement** | Anomaly detection on feedback, demographic skew tracking, human-in-the-loop approval gates, model versioning |
+| 6 | **Deployment & Delivery** | Offline/online conflict resolution, SMS templates with preserved conditional logic, non-text interaction path (voice/IVR, icons) |
+| 7 | **Trust & Safety** | Explicit confidence indicators on every advisory, data-privacy/consent layer, trust incident logging with end-to-end traceability |
+
+### Configuration Flags
+
+All thresholds are configurable via environment variables:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `HARDEN_COORD_MAX_LAT` | 90.0 | Maximum valid latitude |
+| `HARDEN_COORD_MAX_LON` | 180.0 | Maximum valid longitude |
+| `HARDEN_COORD_PRECISION_M` | 50.0 | Minimum coordinate precision in metres |
+| `HARDEN_ELEVATION_VARIANCE` | 150.0 | Elevation variance threshold for complex terrain |
+| `HARDEN_WEATHER_CACHE_TTL` | 30 | Weather cache TTL in minutes |
+| `HARDEN_WEATHER_CACHE_MAX_AGE` | 6 | Max cache age in hours |
+| `HARDEN_CB_FAILURE_THRESHOLD` | 5 | Circuit breaker failure threshold |
+| `HARDEN_CB_TIMEOUT` | 60 | Circuit breaker timeout in seconds |
+| `HARDEN_CB_BACKOFF_BASE` | 1.0 | Exponential backoff base |
+| `HARDEN_SENSOR_OFFLINE_MIN` | 30 | Sensor offline threshold in minutes |
+| `HARDEN_SENSOR_DRIFT` | 5.0 | Sensor drift threshold |
+| `HARDEN_NDVI_CLOUD` | 0.1 | NDVI cloud obscuration threshold |
+| `HARDEN_ALERT_COOLDOWN` | 60 | Alert deduplication cooldown in minutes |
+| `HARDEN_OOD_PERCENTILE` | 95.0 | OOD detection percentile |
+| `HARDEN_LOW_CONF_THRESHOLD` | 50 | Low-confidence region data point threshold |
+| `HARDEN_WATER_CAP` | 50.0 | Water sustainability cap in mm |
+| `HARDEN_COLD_START_MIN` | 10 | Minimum interactions for cold-start policy |
+| `HARDEN_FEEDBACK_RATE_LIMIT` | 5 | Feedback rate limit per minute |
+| `HARDEN_FEEDBACK_ANOMALY_Z` | 3.0 | Feedback anomaly z-score threshold |
+| `HARDEN_FEEDBACK_SKEW_PERCENT` | 10.0 | Feedback skew top-percent threshold |
+| `HARDEN_PWA_TTL` | 24 | PWA offline conflict TTL in hours |
+| `HARDEN_SMS_MAX_LENGTH` | 160 | SMS max character length |
+| `HARDEN_SMS_CONDITIONAL_RESERVE` | 30 | SMS conditional clause reserve |
+
+### Running Tests
+
+```bash
+python -m pytest tests/test_edge_case_hardening.py -v
+```
+
+Or without pytest:
+
+```bash
+python tests/test_edge_case_hardening.py
+```
 
 ---
 
@@ -122,7 +183,8 @@ A real-time, AI-powered weather monitoring and prediction system built with Flas
 
 ### Step 1: Clone or Download the Repository
 ```bash
-cd "f:\Programming\Projects\3rd semester pbl's\Smart_weather_system"
+git clone https://github.com/Khan-Feroz211/Smart_weather_system.git
+cd Smart_weather_system
 ```
 
 ### Step 2: Install Dependencies
