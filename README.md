@@ -163,9 +163,10 @@ python tests/test_edge_case_hardening.py
 - **SQLite3**: Built-in relational database for data storage
 
 ### Frontend
-- **Bootstrap 5.3.0**: Responsive CSS framework with dark theme
+- **Bootstrap 5.3.0**: Responsive CSS framework with dark/light theme
 - **Font Awesome 6.4.0**: Icon library for UI elements
 - **Socket.IO Client 4.7.2**: Real-time client-side event handling
+- **Vite 5.x**: Frontend build tool and dev server
 - **Custom CSS**: Futuristic, animated design with glass-morphism effects
 
 ### External Services
@@ -178,6 +179,7 @@ python tests/test_edge_case_hardening.py
 
 ### Prerequisites
 - Python 3.8 or higher
+- Node.js 18+ and npm
 - pip (Python package manager)
 - Internet connection (for API calls)
 
@@ -189,8 +191,34 @@ cd Smart_weather_system
 
 ### Step 2: Install Dependencies
 ```bash
+# Install Python dependencies
 pip install -r requirements.txt
+
+# Install Node.js dependencies
+npm install
 ```
+
+### Step 3: Run the Application
+```bash
+# Single command to start both frontend and backend
+npm start
+```
+
+This starts:
+- **Flask backend** on `http://127.0.0.1:5000`
+- **Vite dev server** (frontend proxy) on `http://127.0.0.1:3000`
+
+Or run them separately:
+```bash
+npm run backend     # Start Flask backend only
+npm run frontend    # Start Vite dev server only
+```
+
+Or run the Flask app directly without npm:
+```bash
+python app_clean.py
+```
+Then open `http://127.0.0.1:5000` in your browser.
 
 The `requirements.txt` includes:
 ```

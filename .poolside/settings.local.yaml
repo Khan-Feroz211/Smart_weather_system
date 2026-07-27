@@ -26,3 +26,12 @@ tools:
             - git diff *
             - git status *
             - git add *
+            - git commit *
+            - git push origin *
+            - curl *
+            - Select-String *
+            - netstat *
+            - findstr *
+            - npm *
+            - node *
+            - Out-String *

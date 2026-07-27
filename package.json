@@ -1,0 +1,30 @@
+{
+  "name": "smart-weather-system",
+  "version": "1.0.0",
+  "description": "AI-powered weather monitoring and prediction system",
+  "scripts": {
+    "start": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "backend": "python app_clean.py",
+    "frontend": "vite preview --host --port 3000",
+    "dev": "concurrently \"npm run backend\" \"npm run frontend:dev\"",
+    "frontend:dev": "vite --host --port 3000",
+    "build": "vite build",
+    "preview": "vite preview --host --port 3000",
+    "test": "python -m pytest tests/test_edge_case_hardening.py -v",
+    "test:unittest": "python tests/test_edge_case_hardening.py",
+    "lint": "echo \"No linting configured\"",
+    "clean": "rm -rf node_modules .venv/__pycache__ __pycache__ *.pyc"
+  },
+  "keywords": ["weather", "ai", "flask", "socketio", "agriculture"],
+  "author": "Feroz U Din",
+  "license": "MIT",
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "concurrently": "^8.0.0"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=18.0.0",
+    "python": ">=3.8.0"
+  }
+}
