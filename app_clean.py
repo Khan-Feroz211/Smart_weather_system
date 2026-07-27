@@ -2883,4 +2883,4 @@ atexit.register(shutdown_app)
 if __name__ == '__main__':
     initialize_app()
     print("🌐 Starting Flask-SocketIO server on port 8000...")
-    socketio.run(app, host='0.0.0.0', port=8000, debug=True)
+    socketio.run(app, host='0.0.0.0', port=8000, debug=True, allow_unsafe_werkzeug=True)
