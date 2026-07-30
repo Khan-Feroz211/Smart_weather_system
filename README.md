@@ -1,34 +1,310 @@
-# 🌦️ Smart Weather System
+# Smart Weather System — AI-Powered Multi-Hazard Early Warning
 
-## Author
- Feroz U Din
+**A robust, explainable, multi-hazard early warning system for rural and low-connectivity environments (Pakistan).**
 
-
-A real-time, AI-powered weather monitoring and prediction system built with Flask, Socket.IO, and Machine Learning. This intelligent system provides live weather updates, personalized alerts, activity recommendations, and accurate weather predictions using advanced AI algorithms.
-
-![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
-![Flask](https://img.shields.io/badge/Flask-2.3.3-green.svg)
-![License](https://img.shields.io/badge/License-MIT-yellow.svg)
-![Status](https://img.shields.io/badge/Status-Active-success.svg)
+- **Author**: Feroz U Din
+- **License**: MIT
+- **Python**: 3.11+
+- **Status**: Production-ready (6-phase ML pipeline)
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
-- [Features](#-features)
-- [System Architecture](#-system-architecture)
-- [Technology Stack](#-technology-stack)
-- [Installation & Setup](#-installation--setup)
-- [File Structure & Documentation](#-file-structure--documentation)
-- [API Integration](#-api-integration)
-- [AI/ML Implementation](#-aiml-implementation)
-- [Database Schema](#-database-schema)
-- [Usage Guide](#-usage-guide)
-- [Configuration](#-configuration)
-- [Troubleshooting](#-troubleshooting)
-- [Contributing](#-contributing)
-- [License](#-license)
-- [Edge-Case Hardening](#-edge-case-hardening)
+- [Quick Start](#quick-start)
+- [System Architecture](#system-architecture)
+- [Phase 1: Stacking Ensemble](#phase-1-stacking-ensemble)
+- [Phase 2: Advanced Feature Engineering](#phase-2-advanced-feature-engineering)
+- [Phase 3: Time-Aware & Location-Aware Cross-Validation](#phase-3-time-aware--location-aware-cross-validation)
+- [Phase 4: Explainable AI (XAI)](#phase-4-explainable-ai-xai)
+- [Phase 5: Multi-Hazard Output & Crisis Communication](#phase-5-multi-hazard-output--crisis-communication)
+- [Phase 6: Edge-Case Hardening](#phase-6-edge-case-hardening)
+- [API Endpoints](#api-endpoints)
+- [Running Tests](#running-tests)
+- [Configuration](#configuration)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## Quick Start
+
+```bash
+# Clone the repository
+git clone https://github.com/Khan-Feroz211/Smart_weather_system.git
+cd Smart_weather_system
+
+# Create and activate virtual environment
+python -m venv .venv
+.venv\Scripts\activate  # Windows
+source .venv/bin/activate  # Linux/macOS
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the application
+python app_clean.py
+# Then open http://localhost:8000 in your browser
+```
+
+---
+
+## System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Client Browser                          │
+│  (HTML5, CSS3, JS, Bootstrap 5, Socket.IO Client)          │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          │ HTTP/WebSocket
+                          │
+┌─────────────────────────▼───────────────────────────────────┐
+│                   Flask Web Server                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│  │   Routes     │  │  SocketIO    │  │   AI Stack   │     │
+│  │   Handler    │  │   Events     │  │  (6 Phases)  │     │
+│  └──────────────┘  └──────────────┘  └──────────────┘     │
+└─────────────────────────┬───────────────────────────────────┘
+        ┌────────┬────────┬────────┬────────┬────────┬────────┐
+        │        │        │        │        │        │        │
+        ▼        ▼        ▼        ▼        ▼        ▼
+┌─────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+│  SQLite DB  │ │OpenWeather API│ │APScheduler    │ │Stacking      │ │Feature       │ │XAI System    │
+│             │ │              │ │Scheduler      │ │Ensemble      │ │Engineering   │ │(SHAP+LIME)   │
+│             │ │              │ │              │ │(RF+XGB+LGBM+│ │(Lag, Rolling,│ │              │
+│             │ │              │ │              │ │ELM→LogReg)   │ │Interactions, │ │              │
+│             │ │              │ │              │ │              │ │Upper-Level)  │ │              │
+└─────────────┘ └──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘
+                                                                                                       │
+┌─────────────────────────────────────────────────────────────┐                                         │
+│                       Edge-Case Layer                       │◄────────────────────────────────────────┘
+│  FallbackCache (7-day) • CacheMode • Confidence Penalty • CircuitBreaker
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Phase 1: Stacking Ensemble
+
+**File**: `stacking_ensemble.py`
+
+A Stacking Ensemble Classifier combining four diverse base learners with a Logistic Regression meta-learner:
+
+| Base Learner | Role | Key Strength |
+|---|---|---|
+| Random Forest | Primary classifier | High generalization, handles noise |
+| XGBoost | Gradient boosting | Fast, handles missing data |
+| LightGBM | Gradient boosting | Memory-efficient, fast training |
+| ELM (Extreme Learning Machine) | Neural network | Rapid time-series feature extraction |
+
+**Meta-Learner**: Logistic Regression (combines base learner outputs optimally)
+
+**Key Features**:
+- Out-of-fold predictions to prevent data leakage during meta-learner training
+- Per-learner try/except fallback (if LightGBM crashes on Windows, other learners continue)
+- `predict_multi_hazard()` method for multi-class hazard prediction
+- Model persistence via joblib (`models/stacking_ensemble.joblib`)
+
+---
+
+## Phase 2: Advanced Feature Engineering
+
+**File**: `feature_engineering.py`
+
+### Temporal Features
+- **Lag features**: t-1, t-3, t-6, t-12 hours for temperature, humidity, pressure
+- **Rolling statistics**: 3, 6, 12, 24-hour rolling mean and std
+
+### Interaction Terms
+- Heat index (Temp * Humidity interaction)
+- Vapor Pressure Deficit (VPD)
+- Dew point calculation
+- Air density proxy (Pressure / Temperature)
+- Wind chill
+- Fire weather index
+- Storm potential index
+- Growing Degree Days (GDD)
+
+### Cyclical Encoding
+- Hour of day → sin/cos (captures daily cycle)
+- Day of year → sin/cos (captures seasonal cycle)
+- Month → sin/cos
+- Day of week → sin/cos
+
+### Upper-Level Data
+- 850hPa and 500hPa geopotential height
+- 850hPa and 500hPa wind components (u, v)
+- Temperature advection proxy
+- Thickness analysis
+- Wind shear
+
+### Coverage
+- 15 Pakistani cities: Lahore, Islamabad, Karachi, Peshawar, Quetta, Multan, Faisalabad, Rawalpindi, Gujranwala, Hyderabad, Sukkur, Larkana, Bahawalpur, Sialkot, Sargodha
+
+---
+
+## Phase 3: Time-Aware & Location-Aware Cross-Validation
+
+**File**: `evaluation.py`
+
+### Temporal Split CV
+- Trains on historical timeline, tests on strictly future data
+- No data leakage — model cannot "peek" into the future
+- Configurable split date (default: 80% train, 20% test by time)
+
+### Leave-One-Location-Out CV (LOLO)
+- Trains on all cities except one, tests on the excluded city
+- Ensures model generalizes to new, unseen locations
+- Critical for rural deployment where some areas have sparse data
+
+### Metrics
+| Metric | Purpose |
+|---|---|
+| Brier Skill Score (BSS) | Probabilistic reliability of hazard forecasts |
+| AUC-ROC | Discrimination ability across all hazard classes |
+| R² | Point prediction accuracy |
+| F1 Score (macro/weighted) | Classification quality |
+| Precision & Recall | False alarm vs. missed event tradeoff |
+
+---
+
+## Phase 4: Explainable AI (XAI)
+
+**File**: `xai_explainability.py`
+
+### Global Explainability (SHAP)
+- Ranks feature importance across all predictions
+- Shows which environmental variables (wind shear, humidity, etc.) drive hazard detection
+- Generates SHAP summary plots and value plots
+
+### Local Explainability (LIME)
+- Explains why a specific alert was triggered
+- Generates human-readable text reports:
+  > "Alert Triggered because: High humidity combined with rising 3-hour temperature trend exceeds thresholds"
+
+### Integration
+- `XAISystem` class orchestrates both SHAP and LIME
+- Text reports accompany every alert sent to users
+- Explanations are included in API responses
+
+---
+
+## Phase 5: Multi-Hazard Output & Crisis Communication
+
+**File**: `multi_hazard.py`
+
+### 5 Hazard Categories
+1. **Extreme Heat / Heatwave**
+2. **Extreme Cold / Frost**
+3. **Heavy Rain / Flood risk**
+4. **High Wind / Storm risk**
+5. **Normal** (baseline)
+
+### NWS/INFORM Risk Color Coding
+| Level | Color | Hex Code | Meaning |
+|---|---|---|---|
+| 0 | Green | `#00E450` | No risk |
+| 1 | Yellow | `#FFCC00` | Minor risk |
+| 2 | Orange | `#FF6600` | Moderate risk |
+| 3 | Red | `#CC0000` | Severe risk |
+
+### Crisis Communication
+- `CrisisCommunicationSystem`: Generates crisis-level messages
+- `AlertStore`: Persists alerts with timestamps and locations
+- SMS alerts with pre-translated templates (Urdu/Sindhi/Pashto/Saraiki/Balochi)
+- Voice prompts for low-literacy users
+- Per-hazard action recommendations (e.g., "Apply frost protection", "Secure loose objects")
+
+---
+
+## Phase 6: Edge-Case Hardening
+
+**File**: `edge_case_hardening_v2.py`
+
+### Graceful Degradation
+- **FallbackCacheSystem**: Stores last 7 days of weather observations and model predictions locally
+- **CacheMode**: Automatic failover between `ONLINE`, `CACHE`, and `OFFLINE` modes
+- **CircuitBreaker**: Trips after 5 consecutive API failures, retries after 60s timeout
+- **ConfidencePenaltySystem**: 
+  - -5% per hour of stale data
+  - -10% per missing weather field
+  - Minimum confidence: 10% (prevents false alarms)
+
+### Configuration
+| Flag | Default | Description |
+|---|---|---|
+| `CACHE_RETENTION_DAYS` | 7 | Days to retain cached data |
+| `CONFIDENCE_MINIMUM` | 0.1 | Minimum confidence threshold |
+| `CONFIDENCE_PENALTY_PER_HOUR_STALE` | 0.05 | Penalty per hour of stale data |
+| `CONFIDENCE_PENALTY_PER_MISSING_FIELD` | 0.1 | Penalty per missing field |
+| `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | 5 | Failures before circuit opens |
+| `CIRCUIT_BREAKER_TIMEOUT_SECONDS` | 60 | Timeout before retry |
+
+---
+
+## API Endpoints
+
+### Multi-Hazard Prediction
+- `GET /api/hazards/predict` — Predict hazards for a location
+- `GET /api/hazards/alerts` — Get active alerts for all hazards
+- `GET /api/hazards/dashboard` — Full dashboard data with risk levels
+
+### Explainability
+- `GET /api/xai/global` — Global SHAP feature importance
+- `GET /api/xai/local/<location>` — Local LIME explanation for a specific alert
+
+### System Management
+- `GET /api/system/status` — System health (cache mode, circuit breaker, confidence)
+- `POST /api/system/cache/clear` — Clear fallback cache
+- `GET /api/system/cache/stats` — Cache statistics
+
+### Evaluation
+- `GET /api/evaluation/temporal` — Temporal cross-validation results
+
+---
+
+## Running Tests
+
+```bash
+# Run all tests
+python -m pytest tests/test_multi_hazard_system.py -v
+
+# Or without pytest
+python tests/test_multi_hazard_system.py
+
+# Quick import check
+python -c "import app_clean; print('Import OK')"
+```
+
+**Test Coverage** (42 tests across 7 test classes):
+- TestStackingEnsemble (7 tests)
+- TestFeatureEngineering (7 tests)
+- TestEvaluation (5 tests)
+- TestXAI (3 tests)
+- TestMultiHazard (8 tests)
+- TestEdgeCaseHardening (10 tests)
+- TestIntegration (2 tests)
+
+---
+
+## Configuration
+
+Create a `.env` file in the project root:
+
+```env
+SECRET_KEY=smart_weather_system_secret_2024
+OPENWEATHER_API_KEY=your_api_key_here
+DEBUG=True
+SENSOR_MODE=simulation
+```
+
+---
+
+## License
+
+MIT License — see [LICENSE](LICENSE) file for details.
 
 ---
 

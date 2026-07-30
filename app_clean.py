@@ -1,3 +1,11 @@
+import sys
+import os
+
+# Ensure UTF-8 encoding for stdout/stderr (fixes UnicodeEncodeError on Windows)
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
 from flask_socketio import SocketIO, emit
 import sqlite3
@@ -18,11 +26,28 @@ import atexit
 from dotenv import load_dotenv
 from collections import defaultdict, deque
 import statistics
+import logging
+
+# Import Phase 1-6 modules
+from stacking_ensemble import StackingEnsemble, HAZARD_CATEGORIES, RISK_COLORS
+from feature_engineering import AdvancedFeatureEngineer
+from evaluation import ComprehensiveEvaluator
+from xai_explainability import XAISystem
+from multi_hazard import MultiHazardClassifier, CrisisCommunicationSystem, AlertStore
+from edge_case_hardening_v2 import (
+    GracefulDegradationManager, CacheMode,
+    ConfidencePenaltySystem, FallbackCacheSystem
+)
 
 # Load environment variables
 load_dotenv()
 
-
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'smart_weather_ai_2024')
@@ -35,12 +60,13 @@ SENSOR_GATEWAY_URL = os.environ.get('SENSOR_GATEWAY_URL', '').strip()
 SENSOR_STALE_MINUTES = int(os.environ.get('SENSOR_STALE_MINUTES', '15'))
 SENSOR_MODE = os.environ.get('SENSOR_MODE', 'simulation').lower()  # 'simulation' or 'real'
 
-# AI Model Storage
-MODEL_PATH = 'models/weather_model.joblib'
+# AI Model Storage (Phase 1: Stacking Ensemble)
+MODEL_PATH = 'models/stacking_ensemble.joblib'
 SCALER_PATH = 'models/scaler.joblib'
 
-# Create models directory
+# Create directories
 os.makedirs('models', exist_ok=True)
+os.makedirs('cache', exist_ok=True)
 
 SENSOR_FIELD_RANGES = {
     'temperature': (-50.0, 60.0),
@@ -69,117 +95,366 @@ VALIDATION_PENALTY_PER_FLAG = 0.12
 KMH_TO_MPS = 0.277778
 
 class WeatherAI:
+    """
+    AI System using Stacking Ensemble Classifier (Phase 1) with
+    Advanced Feature Engineering (Phase 2), XAI (Phase 4),
+    Multi-Hazard Output (Phase 5), and Edge-Case Hardening (Phase 6).
+
+    Replaces the single Random Forest with:
+      - Base Learners: Random Forest, XGBoost, LightGBM, ELM
+      - Meta-Learner: Logistic Regression
+      - Feature Engineering: lag features, rolling stats, interaction terms,
+        cyclical encoding, upper-level data
+      - XAI: SHAP (global), LIME (local)
+      - Multi-Hazard: 5 hazard categories with NWS/INFORM color coding
+      - Graceful Degradation: cache mode, confidence penalties
+    """
+
     def __init__(self):
-        self.model = RandomForestRegressor(n_estimators=50, random_state=42, max_depth=10)
-        self.scaler = StandardScaler()
+        # Phase 1: Stacking Ensemble
+        self.ensemble = StackingEnsemble(
+            n_estimators_rf=100,
+            n_estimators_xgb=100,
+            n_estimators_lgb=100,
+            n_hidden_elm=100,
+            meta_lr=0.01,
+            cv_folds=5,
+            random_state=42,
+        )
+
+        # Phase 2: Feature Engineering
+        self.feature_engineer = AdvancedFeatureEngineer()
+
+        # Phase 4: XAI System
+        self.xai_system = None  # Initialized after training
+
+        # Phase 5: Multi-Hazard Classifier
+        self.hazard_classifier = MultiHazardClassifier()
+
+        # Phase 5: Crisis Communication
+        self.communication_system = CrisisCommunicationSystem()
+
+        # Phase 6: Graceful Degradation
+        self.degradation_manager = GracefulDegradationManager(
+            cache_dir='cache',
+            api_url=OPENWEATHER_URL,
+            api_key=OPENWEATHER_API_KEY,
+        )
+
         self.is_trained = False
         self.training_data_points = 0
-    
-    def prepare_features(self, historical_data):
-        """Prepare features for training - optimized for performance"""
+        self._feature_names = []
+        self._training_data_for_xai = None
+
+    def prepare_features(self, historical_data, location='Unknown'):
+        """
+        Prepare features for training using Advanced Feature Engineering (Phase 2).
+
+        Generates:
+          - Lag features (t-1, t-3, t-6, t-12 hours)
+          - Rolling statistics (mean, std, min, max)
+          - Interaction terms (heat index, VPD, air density, etc.)
+          - Cyclical encoding (hour, day, month, day_of_week)
+          - Upper-level atmospheric features (850hPa, 500hPa)
+        """
         if len(historical_data) < 20:
-            return None, None
-        
+            return None, None, None
+
         try:
             df = pd.DataFrame(historical_data)
-            features = []
-            targets = []
-            
-            for i in range(len(df) - 1):
-                current = df.iloc[i]
-                features.append([
-                    current['temperature'],
-                    current['humidity'],
-                    current['pressure'] / 100,  # Normalize pressure
-                    current['wind_speed'],
-                    current['hour'],
-                    current['day_of_week'],
-                    current['month']
-                ])
-                targets.append(df.iloc[i + 1]['temperature'])
-            
-            return np.array(features), np.array(targets)
+
+            # Ensure required columns
+            for col in ['temperature', 'humidity', 'pressure', 'wind_speed']:
+                if col not in df.columns:
+                    df[col] = 20.0 if col == 'temperature' else (
+                        60.0 if col == 'humidity' else (1013.0 if col == 'pressure' else 5.0)
+                    )
+
+            # Ensure timestamp
+            if 'timestamp' not in df.columns:
+                df['timestamp'] = pd.date_range(
+                    start=datetime.now(), periods=len(df), freq='h'
+                )
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df = df.sort_values('timestamp').reset_index(drop=True)
+
+            # Engineer features
+            df_engineered, feature_names = self.feature_engineer.engineer_features(df, location)
+
+            if len(df_engineered) < 5:
+                return None, None, None
+
+            # Create target labels (hazard categories)
+            targets = self._create_hazard_labels(df_engineered)
+
+            # Extract feature matrix
+            X = df_engineered[feature_names].values.astype(float)
+            y = np.array(targets)
+
+            # Store feature names
+            self._feature_names = feature_names
+
+            # Store training data for XAI
+            self._training_data_for_xai = X.copy()
+
+            return X, y, feature_names
+
         except Exception as e:
-            print(f"Feature preparation error: {e}")
-            return None, None
-    
-    def train(self, historical_data):
-        """Train the AI model with error handling"""
+            logger.error(f"Feature preparation error: {e}")
+            return None, None, None
+
+    def _create_hazard_labels(self, df):
+        """
+        Create multi-hazard classification labels from weather data.
+
+        Labels: extreme_heat_heatwave, extreme_cold_frost,
+                heavy_rain_flood, high_wind_storm, normal
+        """
+        labels = []
+        for _, row in df.iterrows():
+            temp = row.get('temperature', 20.0)
+            humidity = row.get('humidity', 60.0)
+            wind_speed = row.get('wind_speed', 5.0)
+            pressure = row.get('pressure', 1013.0)
+            heat_index = row.get('heat_index', temp)
+
+            # Determine hazard category
+            if temp >= 38 or heat_index >= 40:
+                labels.append('extreme_heat_heatwave')
+            elif temp <= 2:
+                labels.append('extreme_cold_frost')
+            elif wind_speed >= 25:
+                labels.append('high_wind_storm')
+            elif pressure < 1000 and row.get('pressure_trend_6h', 0) < -2:
+                labels.append('heavy_rain_flood')
+            else:
+                labels.append('normal')
+
+        return labels
+
+    def train(self, historical_data, location='Unknown'):
+        """
+        Train the Stacking Ensemble model (Phase 1).
+
+        Uses Time-Aware Cross-Validation (Phase 3) to evaluate the model
+        before deployment.
+        """
         try:
-            X, y = self.prepare_features(historical_data)
+            X, y, feature_names = self.prepare_features(historical_data, location)
             if X is None or len(X) < 10:
-                print("Insufficient data for training")
+                logger.warning("Insufficient data for training")
                 return False
-            
-            X_scaled = self.scaler.fit_transform(X)
-            X_train, X_test, y_train, y_test = train_test_split(
-                X_scaled, y, test_size=0.2, random_state=42
-            )
-            
-            self.model.fit(X_train, y_train)
+
+            # Train the stacking ensemble
+            logger.info(f"Training Stacking Ensemble with {len(X)} samples, {len(feature_names)} features")
+            self.ensemble.fit(X, y, feature_names=feature_names)
+
             self.is_trained = True
             self.training_data_points = len(X)
-            
-            # Save model and scaler
-            joblib.dump(self.model, MODEL_PATH)
-            joblib.dump(self.scaler, SCALER_PATH)
-            
-            score = self.model.score(X_test, y_test)
-            print(f"✅ AI Model trained successfully! R² score: {score:.3f}")
-            
+
+            # Save model
+            self.ensemble.save(MODEL_PATH)
+
+            # Initialize XAI system
+            self.xai_system = XAISystem(
+                model=self.ensemble,
+                feature_names=feature_names,
+                class_names=HAZARD_CATEGORIES,
+                training_data=X,
+            )
+
+            # Update hazard classifier with trained model
+            self.hazard_classifier = MultiHazardClassifier(
+                ml_model=self.ensemble,
+                feature_names=feature_names,
+            )
+
+            # Run Time-Aware evaluation (Phase 3)
+            evaluator = ComprehensiveEvaluator(temporal_splits=3, train_fraction=0.8)
+            try:
+                eval_results = evaluator.evaluate_temporal(
+                    self.ensemble, X, y, feature_names=feature_names
+                )
+                report = evaluator.generate_report(eval_results)
+                logger.info(f"\n{report}")
+            except Exception as e:
+                logger.warning(f"Evaluation failed: {e}")
+
             # Emit training completion event
+            training_metrics = self.ensemble.training_metrics
             socketio.emit('ai_training_complete', {
-                'score': round(score, 3),
+                'score': training_metrics.get('training_accuracy', 0.0),
                 'data_points': self.training_data_points,
+                'model_version': self.ensemble.model_version,
+                'base_learners': self.ensemble.base_learner_names,
                 'timestamp': datetime.now().isoformat()
             })
-            
+
+            logger.info(f"✅ Stacking Ensemble trained! Accuracy: {training_metrics.get('training_accuracy', 0):.3f}")
             return True
+
         except Exception as e:
-            print(f"❌ Training failed: {e}")
+            logger.error(f"❌ Training failed: {e}")
+            import traceback
+            traceback.print_exc()
             return False
-    
+
     def load_model(self):
-        """Load trained model"""
+        """Load trained Stacking Ensemble model."""
         try:
-            if os.path.exists(MODEL_PATH) and os.path.exists(SCALER_PATH):
-                self.model = joblib.load(MODEL_PATH)
-                self.scaler = joblib.load(SCALER_PATH)
+            if os.path.exists(MODEL_PATH):
+                self.ensemble = StackingEnsemble()
+                self.ensemble.load(MODEL_PATH)
                 self.is_trained = True
-                print("✅ AI Model loaded successfully!")
+                self._feature_names = self.ensemble._feature_names
+                self.training_data_points = self.ensemble.training_metrics.get('training_data_points', 0)
+
+                # Initialize XAI and hazard classifier
+                self.xai_system = XAISystem(
+                    model=self.ensemble,
+                    feature_names=self._feature_names,
+                    class_names=HAZARD_CATEGORIES,
+                )
+                self.hazard_classifier = MultiHazardClassifier(
+                    ml_model=self.ensemble,
+                    feature_names=self._feature_names,
+                )
+
+                logger.info(f"✅ Stacking Ensemble loaded! Version: {self.ensemble.model_version}")
                 return True
         except Exception as e:
-            print(f"❌ Model loading failed: {e}")
+            logger.error(f"❌ Model loading failed: {e}")
         return False
-    
-    def predict(self, current_weather):
-        """Predict next hour's weather"""
+
+    def predict(self, current_weather, location='Unknown', recent_history=None):
+        """
+        Predict multi-hazard probabilities using the Stacking Ensemble.
+
+        Phase 5: Returns probabilities for all hazards simultaneously.
+        Phase 6: Uses graceful degradation if API/data is unavailable.
+        """
         if not self.is_trained:
-            return None
-        
+            return self._fallback_prediction(current_weather, location)
+
         try:
-            now = datetime.now()
-            features = np.array([[
-                current_weather['temperature'],
-                current_weather['humidity'],
-                current_weather['pressure'] / 100,
-                current_weather['wind_speed'],
-                now.hour,
-                now.weekday(),
-                now.month
-            ]])
-            
-            features_scaled = self.scaler.transform(features)
-            prediction = self.model.predict(features_scaled)[0]
-            
-            return {
-                'predicted_temperature': round(prediction, 1),
-                'confidence': min(0.95, max(0.6, 0.85)),  # Simulated confidence
-                'timestamp': (now + timedelta(hours=1)).isoformat()
+            # Prepare features using Phase 2 feature engineering
+            features = self.feature_engineer.prepare_single_prediction(
+                current_weather, recent_history, location
+            )
+
+            # Get ML hazard probabilities
+            ml_result = self.ensemble.predict_multi_hazard(features)
+            ml_probabilities = ml_result.get("hazard_probabilities", {})
+
+            # Classify hazards (Phase 5: hybrid ML + rule-based)
+            hazard_classification = self.hazard_classifier.classify_hazards(
+                weather_data=current_weather,
+                features=features,
+                ml_probabilities=ml_probabilities,
+            )
+
+            # Generate XAI explanation (Phase 4)
+            explanation = None
+            if self.xai_system:
+                explanation = self.xai_system.explain_alert(
+                    features, hazard_classification["hazard_probabilities"]
+                )
+
+            # Generate alert (Phase 5)
+            alert = self.communication_system.generate_alert(
+                location=location,
+                hazard_classification=hazard_classification,
+                explanation=explanation,
+            )
+
+            # Apply confidence penalty (Phase 6)
+            confidence = hazard_classification["hazard_probabilities"].get("normal", 0.5)
+            penalized_confidence, penalty_reasons = ConfidencePenaltySystem.apply_penalty(
+                base_confidence=1.0 - confidence,
+                is_cache_mode=current_weather.get("data_source") == "cached",
+            )
+
+            alert["confidence"] = round(penalized_confidence, 4)
+            alert["confidence_label"] = ConfidencePenaltySystem.get_confidence_label(penalized_confidence)
+            alert["confidence_penalty_reasons"] = penalty_reasons
+
+            # Add prediction metadata
+            alert["prediction"] = {
+                "predicted_temperature": current_weather.get("temperature"),
+                "hazard_probabilities": hazard_classification["hazard_probabilities"],
+                "model_version": self.ensemble.model_version,
+                "feature_names": self._feature_names,
+                "timestamp": (datetime.now() + timedelta(hours=1)).isoformat(),
             }
+
+            return alert
+
         except Exception as e:
-            print(f"Prediction error: {e}")
-            return None
+            logger.error(f"Prediction error: {e}")
+            import traceback
+            traceback.print_exc()
+            return self._fallback_prediction(current_weather, location)
+
+    def _fallback_prediction(self, current_weather, location='Unknown'):
+        """Fallback prediction using rule-based hazard detection only."""
+        hazard_classification = self.hazard_classifier.classify_hazards(
+            weather_data=current_weather,
+            ml_probabilities={h: 0.0 for h in HAZARD_CATEGORIES},
+        )
+
+        alert = self.communication_system.generate_alert(
+            location=location,
+            hazard_classification=hazard_classification,
+        )
+
+        alert["confidence"] = 0.3
+        alert["confidence_label"] = "low"
+        alert["confidence_penalty_reasons"] = ["model_not_trained", "rule_based_only"]
+        alert["prediction"] = {
+            "predicted_temperature": current_weather.get("temperature"),
+            "hazard_probabilities": hazard_classification["hazard_probabilities"],
+            "model_version": "fallback_rule_based",
+            "timestamp": (datetime.now() + timedelta(hours=1)).isoformat(),
+        }
+
+        return alert
+
+    def predict_with_degradation(self, location, lat=None, lon=None):
+        """
+        Fetch weather with graceful degradation (Phase 6) and predict.
+
+        This is the main entry point for production predictions.
+        """
+        # Fetch weather with graceful degradation
+        weather_data = self.degradation_manager.fetch_weather_with_degradation(
+            location, lat, lon
+        )
+
+        # Get recent history from cache
+        recent_history = self.degradation_manager.cache.get_recent_weather_history(
+            location, hours=24
+        )
+
+        # Predict
+        alert = self.predict(weather_data, location, recent_history)
+
+        # Add degradation metadata
+        alert["degradation_info"] = {
+            "mode": weather_data.get("mode", "unknown"),
+            "data_source": weather_data.get("data_source", "unknown"),
+            "data_age_hours": weather_data.get("data_age_hours", 0),
+            "stale_data_warning": weather_data.get("stale_data_warning"),
+            "cache_mode_banner": weather_data.get("cache_mode_banner"),
+            "api_error": weather_data.get("api_error"),
+            "circuit_breaker_state": weather_data.get("circuit_breaker_state"),
+        }
+
+        # Store in cache
+        self.degradation_manager.cache.store_weather(
+            location, weather_data, confidence=alert.get("confidence", 0.5)
+        )
+
+        return alert
 
     def assess_data_quality(self, validation_result, cleaning_notes, features):
         """Rule-based quality assessment for sensor records"""
@@ -456,7 +731,32 @@ def engineer_features(cleaned_record, validation_result):
     return features
 
 def build_decision(cleaned_record, prediction, quality_assessment):
-    """Generate decision output from weather + quality + AI prediction"""
+    """
+    Generate decision output from weather + quality + AI prediction.
+
+    Phase 5: Uses multi-hazard output with NWS/INFORM color coding.
+    The prediction from the new WeatherAI.predict() already includes
+    multi-hazard probabilities, risk levels, and recommended actions.
+    """
+    if prediction and 'hazard_probabilities' in prediction:
+        # New multi-hazard prediction format (Phase 5)
+        return {
+            'alert_required': prediction.get('alert_required', False),
+            'severity': prediction.get('overall_risk_level', 'green'),
+            'reason': ', '.join(prediction.get('active_hazards', [])) if prediction.get('active_hazards') else 'normal_conditions',
+            'recommended_action': prediction.get('message', 'Weather conditions normal. Continue monitoring.'),
+            'confidence': prediction.get('confidence', quality_assessment['confidence']),
+            'hazard_probabilities': prediction.get('hazard_probabilities', {}),
+            'risk_levels': prediction.get('risk_levels', {}),
+            'active_hazards': prediction.get('active_hazards', []),
+            'explanation': prediction.get('explanation'),
+            'top_features': prediction.get('top_features'),
+            'degradation_info': prediction.get('degradation_info', {}),
+            'confidence_label': prediction.get('confidence_label', 'unknown'),
+            'confidence_penalty_reasons': prediction.get('confidence_penalty_reasons', []),
+        }
+
+    # Fallback: old-style decision (for backward compatibility)
     severity = 'low'
     reasons = []
     actions = []
@@ -613,7 +913,13 @@ def retrain_ai_with_recent_clean_data(hours=168):
             conn.close()
 
 def process_weather_pipeline(location):
-    """End-to-end sensor ingestion, validation, cleaning, feature, AI, and decision pipeline"""
+    """
+    End-to-end sensor ingestion, validation, cleaning, feature, AI, and decision pipeline.
+
+    Phase 6: Uses graceful degradation for weather fetching.
+    Phase 5: Produces multi-hazard output with NWS/INFORM color coding.
+    Phase 4: Includes XAI explanation (SHAP + LIME).
+    """
     raw_record = ingest_sensor_weather(location)
     validation_result = validate_sensor_data(raw_record)
     cleaned_record = clean_sensor_data(validation_result)
@@ -623,7 +929,16 @@ def process_weather_pipeline(location):
         cleaned_record.get('cleaning_notes', []),
         features
     )
-    prediction = weather_ai.predict(cleaned_record)
+
+    # Phase 6: Get recent history from cache for feature engineering
+    recent_history = weather_ai.degradation_manager.cache.get_recent_weather_history(
+        location, hours=24
+    )
+
+    # Phase 1+5: Predict using Stacking Ensemble with multi-hazard output
+    prediction = weather_ai.predict(cleaned_record, location, recent_history)
+
+    # Phase 5: Build multi-hazard decision
     decision = build_decision(cleaned_record, prediction, quality_assessment)
 
     payload = {
@@ -2244,29 +2559,46 @@ def handle_ai_training_request():
 # Initialize application
 def initialize_app():
     """Initialize the application"""
-    print("🚀 Initializing Smart Weather System...")
+    print("Initializing Smart Weather System...")
     init_database()
     init_agriculture_database()
-    
-    # Try to load existing AI model
+
+    # Phase 6: Load cache from disk
+    weather_ai.degradation_manager.cache._load_cache()
+
+    # Try to load existing AI model (Phase 1: Stacking Ensemble)
     if not weather_ai.load_model():
-        print("🤖 Training new AI model...")
-        # Train with available historical data
-        historical_data = get_historical_weather('London', 168)
-        if historical_data:
-            weather_ai.train(historical_data)
-    
+        print("Training new Stacking Ensemble model...")
+        # Train with available historical data from all locations
+        conn = get_db_connection()
+        if conn:
+            try:
+                locations = conn.execute('SELECT DISTINCT location FROM users').fetchall()
+                for row in locations:
+                    location = row['location']
+                    historical_data = get_historical_weather(location, 168)
+                    if len(historical_data) >= 20:
+                        weather_ai.train(historical_data, location)
+                        break
+            except Exception as e:
+                print(f"Training error: {e}")
+            finally:
+                conn.close()
+
     # Start scheduler for periodic updates
     # Temporarily disabled to fix application context issues
     # scheduler.add_job(lambda: update_weather_data(), 'interval', minutes=2)
     # scheduler.add_job(lambda: retrain_ai_with_recent_clean_data(168), 'interval', hours=1)
     # scheduler.add_job(lambda: evaluate_prediction_quality(), 'interval', minutes=10)
-    
+
     # if not scheduler.running:
     #     scheduler.start()
     #     print("⏰ Scheduler started")
-    
+
     print("✅ Smart Weather System ready!")
+    print(f"   Model version: {weather_ai.ensemble.model_version if weather_ai.is_trained else 'not trained'}")
+    print(f"   Base learners: {weather_ai.ensemble.base_learner_names if weather_ai.is_trained else 'N/A'}")
+    print(f"   Cache mode: {weather_ai.degradation_manager.get_system_status()['mode']}")
 
 # ============================================================
 # SENSOR INGESTION ROUTES
@@ -2869,13 +3201,245 @@ def get_experiment(experiment_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+# ============================================================
+# MULTI-HAZARD ALERTS API (Phase 5)
+# ============================================================
+
+@app.route('/api/hazards/predict')
+def predict_hazards():
+    """Predict multi-hazard probabilities for a location."""
+    location = request.args.get('location', 'Lahore')
+    lat = request.args.get('lat', type=float)
+    lon = request.args.get('lon', type=float)
+
+    try:
+        alert = weather_ai.predict_with_degradation(location, lat, lon)
+        return jsonify({
+            'success': True,
+            'location': location,
+            'alert': alert,
+        })
+    except Exception as e:
+        logger.error(f"Hazard prediction error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/hazards/alerts')
+def get_multi_hazard_alerts():
+    """Get all active multi-hazard alerts."""
+    try:
+        alert_store = AlertStore()
+        alerts = alert_store.get_active_alerts()
+        return jsonify({
+            'success': True,
+            'alerts': alerts,
+            'count': len(alerts),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/hazards/dashboard')
+def get_hazard_dashboard():
+    """Get dashboard-ready data for all locations."""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'error': 'Database connection error'}), 500
+
+        locations = conn.execute('SELECT DISTINCT location FROM users').fetchall()
+        locations_data = []
+
+        for row in locations:
+            location = row['location']
+            try:
+                alert = weather_ai.predict_with_degradation(location)
+                locations_data.append({
+                    'location': location,
+                    'classification': {
+                        'hazard_probabilities': alert.get('hazard_probabilities', {}),
+                        'risk_levels': alert.get('risk_levels', {}),
+                        'active_hazards': alert.get('active_hazards', []),
+                        'overall_risk_level': alert.get('overall_risk_level', 'green'),
+                        'alert_required': alert.get('alert_required', False),
+                        'recommended_actions': alert.get('recommended_actions', {}),
+                    },
+                    'explanation': {
+                        'alert_explanation': alert.get('explanation'),
+                        'top_features': alert.get('top_features'),
+                    },
+                })
+            except Exception as e:
+                logger.warning(f"Dashboard data error for {location}: {e}")
+
+        conn.close()
+
+        dashboard_data = weather_ai.communication_system.generate_dashboard_data(locations_data)
+        return jsonify({
+            'success': True,
+            'dashboard': dashboard_data,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================================
+# XAI EXPLAINABILITY API (Phase 4)
+# ============================================================
+
+@app.route('/api/xai/global')
+def get_global_explanations():
+    """Get global feature importance using SHAP (Phase 4)."""
+    try:
+        if not weather_ai.xai_system:
+            return jsonify({'success': False, 'error': 'XAI system not initialized. Train model first.'}), 400
+
+        # Use training data for global explanation
+        X = weather_ai._training_data_for_xai
+        if X is None or len(X) == 0:
+            return jsonify({'success': False, 'error': 'No training data available for explanation.'}), 400
+
+        result = weather_ai.xai_system.explain_global(X, max_samples=200)
+        return jsonify({
+            'success': True,
+            'global_explanation': result,
+        })
+    except Exception as e:
+        logger.error(f"Global XAI error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/xai/local')
+def get_local_explanation():
+    """Get local LIME explanation for a specific prediction (Phase 4)."""
+    location = request.args.get('location', 'Lahore')
+
+    try:
+        if not weather_ai.xai_system:
+            return jsonify({'success': False, 'error': 'XAI system not initialized. Train model first.'}), 400
+
+        # Get weather data with degradation
+        weather_data = weather_ai.degradation_manager.fetch_weather_with_degradation(location)
+        recent_history = weather_ai.degradation_manager.cache.get_recent_weather_history(location, hours=24)
+
+        # Prepare features
+        features = weather_ai.feature_engineer.prepare_single_prediction(
+            weather_data, recent_history, location
+        )
+
+        # Get explanation
+        explanation = weather_ai.xai_system.explain_local(features, top_k=5)
+
+        return jsonify({
+            'success': True,
+            'location': location,
+            'explanation': explanation,
+        })
+    except Exception as e:
+        logger.error(f"Local XAI error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================================
+# EDGE-CASE HARDENING API (Phase 6)
+# ============================================================
+
+@app.route('/api/system/status')
+def get_system_status():
+    """Get system status including cache mode and degradation info (Phase 6)."""
+    try:
+        status = weather_ai.degradation_manager.get_system_status()
+        return jsonify({
+            'success': True,
+            'system_status': status,
+            'model_version': weather_ai.ensemble.model_version if weather_ai.is_trained else 'not_trained',
+            'is_trained': weather_ai.is_trained,
+            'base_learners': weather_ai.ensemble.base_learner_names if weather_ai.is_trained else [],
+            'feature_count': len(weather_ai._feature_names),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/system/cache/clear', methods=['POST'])
+def clear_cache():
+    """Clear the fallback cache (Phase 6)."""
+    try:
+        weather_ai.degradation_manager.cache.clear()
+        return jsonify({
+            'success': True,
+            'message': 'Cache cleared successfully.',
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/system/cache/stats')
+def get_cache_stats():
+    """Get cache statistics (Phase 6)."""
+    try:
+        stats = weather_ai.degradation_manager.cache.get_cache_stats()
+        return jsonify({
+            'success': True,
+            'cache_stats': stats,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================================
+# EVALUATION API (Phase 3)
+# ============================================================
+
+@app.route('/api/evaluation/temporal')
+def evaluate_temporal():
+    """Run temporal cross-validation evaluation (Phase 3)."""
+    try:
+        if not weather_ai.is_trained:
+            return jsonify({'success': False, 'error': 'Model not trained.'}), 400
+
+        # Get historical data
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'error': 'Database connection error.'}), 500
+
+        location = request.args.get('location', 'Lahore')
+        historical_data = get_historical_weather(location, 168)
+        conn.close()
+
+        if len(historical_data) < 20:
+            return jsonify({'success': False, 'error': 'Insufficient data for evaluation.'}), 400
+
+        # Prepare features
+        X, y, feature_names = weather_ai.prepare_features(historical_data, location)
+        if X is None:
+            return jsonify({'success': False, 'error': 'Feature preparation failed.'}), 400
+
+        # Run evaluation
+        evaluator = ComprehensiveEvaluator(temporal_splits=3, train_fraction=0.8)
+        results = evaluator.evaluate_temporal(
+            weather_ai.ensemble, X, y, feature_names=feature_names
+        )
+        report = evaluator.generate_report(results)
+
+        return jsonify({
+            'success': True,
+            'evaluation_results': results,
+            'report': report,
+        })
+    except Exception as e:
+        logger.error(f"Evaluation error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 # Shutdown handler
 def shutdown_app():
     """Cleanup on application shutdown"""
-    print("🛑 Shutting down Smart Weather System...")
+    print("Shutting down Smart Weather System...")
     if scheduler.running:
         scheduler.shutdown()
-    print("✅ Clean shutdown completed")
+    print("Clean shutdown completed")
 
 # Register shutdown handler
 atexit.register(shutdown_app)
