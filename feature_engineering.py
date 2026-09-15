@@ -445,6 +445,7 @@ class AdvancedFeatureEngineer:
         current_weather: Dict[str, Any],
         recent_history: Optional[List[Dict[str, Any]]] = None,
         location: str = "Unknown",
+        expected_feature_names: Optional[List[str]] = None,
     ) -> np.ndarray:
         """
         Prepare features for a single prediction (real-time inference).
@@ -457,6 +458,12 @@ class AdvancedFeatureEngineer:
             Recent weather observations (last 24+ hours).
         location : str
             City name for upper-level data.
+        expected_feature_names : list of str, optional
+            Feature names the (already-trained) model expects, in the model's
+            order. When provided, the engineered feature row is re-aligned to
+            these names exactly (missing columns filled with 0.0, extra columns
+            ignored). This makes inference robust to feature-drift / schema
+            differences between training and production data.
 
         Returns
         -------
@@ -486,10 +493,21 @@ class AdvancedFeatureEngineer:
         # Engineer features
         df, _ = self.engineer_features(df, location)
 
+        # Determine the canonical feature ordering for the output row.
+        if expected_feature_names is not None:
+            feature_order = list(expected_feature_names)
+        else:
+            feature_order = self.feature_names
+
         # Take the last row (most recent)
         if len(df) == 0:
-            # Fallback: return zeros
-            return np.zeros((1, len(self.feature_names) if self.feature_names else 30))
+            # Fallback: return zeros shaped to the expected feature count.
+            return np.zeros((1, len(feature_order) if feature_order else 30))
 
-        feature_row = df.iloc[-1][self.feature_names].values.astype(float)
-        return feature_row.reshape(1, -1)
+        row = df.iloc[-1]
+        # Re-align to the expected feature order by name. Missing columns
+        # (e.g. cyclical time features absent from a single observation)
+        # become 0.0; any extra/engineered columns not in the model's schema
+        # are dropped. This guarantees a stable feature count & ordering.
+        aligned = row.reindex(feature_order).fillna(0.0).astype(float)
+        return aligned.values.reshape(1, -1)

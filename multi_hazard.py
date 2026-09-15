@@ -297,12 +297,25 @@ class MultiHazardClassifier:
         """
         probs = {hazard: 0.0 for hazard in self.hazard_categories}
 
-        temp = weather_data.get("temperature", 20.0)
-        humidity = weather_data.get("humidity", 60.0)
-        pressure = weather_data.get("pressure", 1013.0)
-        wind_speed = weather_data.get("wind_speed", 5.0)
-        precipitation = weather_data.get("precipitation", 0.0)
-        precipitation_rate = weather_data.get("precipitation_rate", 0.0)
+        # Coerce None values to sensible defaults. The graceful-degradation path
+        # may hand us a record where every field is None (e.g. live API failed and
+        # no cache is available). Arithmetic on None would raise a TypeError and
+        # crash the whole prediction pipeline.
+        temp = None if weather_data.get("temperature") is None else weather_data.get("temperature", 20.0)
+        humidity = None if weather_data.get("humidity") is None else weather_data.get("humidity", 60.0)
+        pressure = None if weather_data.get("pressure") is None else weather_data.get("pressure", 1013.0)
+        wind_speed = None if weather_data.get("wind_speed") is None else weather_data.get("wind_speed", 5.0)
+        precipitation = None if weather_data.get("precipitation") is None else weather_data.get("precipitation", 0.0)
+        precipitation_rate = None if weather_data.get("precipitation_rate") is None else weather_data.get("precipitation_rate", 0.0)
+
+        # Final fallback: use neutral defaults for any remaining None values so the
+        # downstream arithmetic (heat index, dew point, thresholds) never sees None.
+        temp = float(20.0 if temp is None else temp)
+        humidity = float(60.0 if humidity is None else humidity)
+        pressure = float(1013.0 if pressure is None else pressure)
+        wind_speed = float(5.0 if wind_speed is None else wind_speed)
+        precipitation = float(0.0 if precipitation is None else precipitation)
+        precipitation_rate = float(0.0 if precipitation_rate is None else precipitation_rate)
 
         # Compute heat index
         heat_index = temp + 0.33 * np.exp(-0.03 * temp) * humidity
@@ -425,6 +438,14 @@ class CrisisCommunicationSystem:
         dict with complete alert data for the dashboard.
         """
         active_hazards = hazard_classification["active_hazards"]
+        # Tolerate active_hazards arriving either as hazard-name strings (the
+        # direct output of classify_hazards) OR as pre-formatted dicts (when
+        # this method is re-applied to an alert that was already formatted, as
+        # happens in the /api/hazards/dashboard route). Without this, looking
+        # up names/probabilities keyed by a dict raises TypeError.
+        active_hazards = [
+            (h["hazard"] if isinstance(h, dict) else h) for h in active_hazards
+        ]
         risk_levels = hazard_classification["risk_levels"]
         overall_risk = hazard_classification["overall_risk_level"]
 

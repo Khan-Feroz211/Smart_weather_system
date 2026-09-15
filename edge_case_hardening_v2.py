@@ -604,13 +604,19 @@ class GracefulDegradationManager:
                 self.cache.set_mode(CacheMode.CACHE_ONLY)
                 logger.info(f"Using cached data for {location} (age: {(datetime.now() - cached.timestamp).total_seconds()/3600:.1f}h)")
             else:
-                # Step 3: No data at all
+                # Step 3: No data at all. Return a neutral, non-None observation
+                # (rather than all-None) so downstream arithmetic / feature
+                # engineering never crashes on None. These defaults represent a
+                # "typical benign" climate reading; confidence is already
+                # penalised to ~0 via missing_fields above.
                 self.cache.set_mode(CacheMode.OFFLINE)
                 live_data = {
-                    "temperature": None,
-                    "humidity": None,
-                    "pressure": None,
-                    "wind_speed": None,
+                    "temperature": 20.0,
+                    "humidity": 60.0,
+                    "pressure": 1013.0,
+                    "wind_speed": 5.0,
+                    "precipitation": 0.0,
+                    "precipitation_rate": 0.0,
                     "condition": "Unknown",
                     "location": location,
                     "timestamp": datetime.now().isoformat(),

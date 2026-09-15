@@ -354,6 +354,36 @@ class StackingEnsemble:
 
         return learners
 
+    @staticmethod
+    def _normalize_class_proba(probs: np.ndarray, n_classes: int) -> np.ndarray:
+        """
+        Normalize a classifier's probability matrix to exactly ``n_classes`` columns.
+
+        Some base learners emit a non-standard number of columns in degenerate
+        cases:
+          * XGBoost returns 2 columns (binary) even when trained on a single
+            class, so ``predict_proba`` yields shape (n, 2) while ``n_classes==1``.
+          * Some learners may return fewer columns than the global class count
+            when a fold happens to miss a class.
+
+        This pads (uniformly) or truncates (takes the first ``n_classes``
+        columns) so the downstream stacking assignment never hits a shape
+        mismatch.
+        """
+        if probs.ndim != 2:
+            probs = np.atleast_2d(np.asarray(probs))
+        n_rows = probs.shape[0]
+        if probs.shape[1] == n_classes:
+            return np.asarray(probs, dtype=np.float64)
+        if probs.shape[1] < n_classes:
+            # Pad missing classes with the uniform baseline.
+            padded = np.full((n_rows, n_classes), 1.0 / n_classes, dtype=np.float64)
+            padded[:, :probs.shape[1]] = probs
+            return padded
+        # Too many columns: keep the first n_classes.
+        return np.asarray(probs[:, :n_classes], dtype=np.float64)
+
+
     def _generate_out_of_fold_predictions(
         self,
         X: np.ndarray,
@@ -409,11 +439,9 @@ class StackingEnsemble:
                     # Fallback: use uniform probabilities
                     probs = np.ones((len(val_idx), n_classes)) / n_classes
 
-                # Pad if necessary (in case some classes are missing in fold)
-                if probs.shape[1] < n_classes:
-                    padded = np.zeros((probs.shape[0], n_classes))
-                    padded[:, :probs.shape[1]] = probs
-                    probs = padded
+                # Normalize to exactly n_classes columns (handles XGBoost's
+                # binary single-class output and any fold that missed a class).
+                probs = self._normalize_class_proba(probs, n_classes)
 
                 start_col = learner_idx * n_classes
                 end_col = start_col + n_classes
@@ -553,11 +581,9 @@ class StackingEnsemble:
                 logger.warning(f"  Base learner '{name}' prediction failed: {e}")
                 probs = np.ones((n_samples, n_classes)) / n_classes
 
-            # Pad if necessary
-            if probs.shape[1] < n_classes:
-                padded = np.zeros((probs.shape[0], n_classes))
-                padded[:, :probs.shape[1]] = probs
-                probs = padded
+            # Normalize to exactly n_classes columns (keeps XGBoost/LightGBM
+            # consistent with the global class set seen at fit time).
+            probs = self._normalize_class_proba(probs, n_classes)
 
             start_col = learner_idx * n_classes
             end_col = start_col + n_classes

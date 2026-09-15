@@ -35,3 +35,17 @@ tools:
             - npm *
             - node *
             - Out-String *
+            - head *
+            - dir *
+            - where python
+            - D:\SWS\Smart_weather_system\.venv\Scripts\python.exe *
+            - Sort-Object Length *
+            - Get-Command python
+            - Get-Module *
+            - '"C:\Program Files\Python311\python.exe" *'
+            - Get-Content *
+            - ForEach-Object { *
+            - Where-Object { *
+            - git *
+            - Format-Table *
+            - .venv\Scripts\python *

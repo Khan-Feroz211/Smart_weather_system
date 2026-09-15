@@ -53,6 +53,11 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'smart_weather_ai_2024')
 socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="*")
 
+# Register AgriAdvisor API Blueprint (v6)
+from api_routes import agri_bp
+app.register_blueprint(agri_bp)
+
+
 # Configuration
 OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY', 'demo_key')
 OPENWEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
@@ -326,7 +331,7 @@ class WeatherAI:
             logger.error(f"❌ Model loading failed: {e}")
         return False
 
-    def predict(self, current_weather, location='Unknown', recent_history=None):
+    def predict(self, current_weather, location='Unknown', recent_history=None, is_cache_mode=False):
         """
         Predict multi-hazard probabilities using the Stacking Ensemble.
 
@@ -337,9 +342,12 @@ class WeatherAI:
             return self._fallback_prediction(current_weather, location)
 
         try:
-            # Prepare features using Phase 2 feature engineering
+            # Prepare features using Phase 2 feature engineering.
+            # Align to the model's training feature set so inference is robust
+            # to schema drift / extra metadata fields in the weather dict.
             features = self.feature_engineer.prepare_single_prediction(
-                current_weather, recent_history, location
+                current_weather, recent_history, location,
+                expected_feature_names=self._feature_names,
             )
 
             # Get ML hazard probabilities
@@ -371,7 +379,7 @@ class WeatherAI:
             confidence = hazard_classification["hazard_probabilities"].get("normal", 0.5)
             penalized_confidence, penalty_reasons = ConfidencePenaltySystem.apply_penalty(
                 base_confidence=1.0 - confidence,
-                is_cache_mode=current_weather.get("data_source") == "cached",
+                is_cache_mode=is_cache_mode,
             )
 
             alert["confidence"] = round(penalized_confidence, 4)
@@ -435,8 +443,34 @@ class WeatherAI:
             location, hours=24
         )
 
+        # Build a clean observation for the model. The degradation response
+        # contains operational metadata (mode, confidence, api_error, etc.)
+        # which must NOT be treated as weather features. We also derive the
+        # cyclic time features (hour, day_of_week, month) that the trained
+        # model's feature set includes.
+        is_cache_mode = weather_data.get("data_source") == "cached"
+        ts_val = weather_data.get("timestamp") or datetime.now().isoformat()
+        try:
+            ts_dt = datetime.fromisoformat(str(ts_val).replace("Z", "+00:00"))
+        except Exception:
+            ts_dt = datetime.now()
+        clean_weather = {
+            "temperature": weather_data.get("temperature", 20.0),
+            "humidity": weather_data.get("humidity", 60.0),
+            "pressure": weather_data.get("pressure", 1013.0),
+            "wind_speed": weather_data.get("wind_speed", 5.0),
+            "precipitation": weather_data.get("precipitation", 0.0),
+            "precipitation_rate": weather_data.get("precipitation_rate", 0.0),
+            "condition": weather_data.get("condition", "Unknown"),
+            "location": location,
+            "timestamp": ts_val,
+            "hour": ts_dt.hour,
+            "day_of_week": ts_dt.weekday(),
+            "month": ts_dt.month,
+        }
+
         # Predict
-        alert = self.predict(weather_data, location, recent_history)
+        alert = self.predict(clean_weather, location, recent_history, is_cache_mode=is_cache_mode)
 
         # Add degradation metadata
         alert["degradation_info"] = {
@@ -2557,6 +2591,61 @@ def handle_ai_training_request():
             emit('ai_training_failed', {'message': 'AI training failed. Insufficient data.'})
 
 # Initialize application
+def _augment_training_data(historical_data, location='London'):
+    """
+    Augment historical weather data with synthetic extreme-event sequences so
+    every hazard class is represented during (demo) training.
+
+    The bundled seed data only contains benign ("normal") observations, which
+    makes the multi-hazard ensemble degenerate: a single-class label set makes
+    XGBoost emit a 2-column probability matrix and crashes LightGBM, while also
+    producing a model that can never predict any real hazard.
+
+    We synthesize short, self-contained hourly sequences that trip each hazard
+    threshold. The feature-engineering pipeline (lags, rolling stats, pressure
+    trends) then yields correctly-labelled rows for every class, while the
+    benign seed data still covers the "normal" class.
+    """
+    augmented = list(historical_data) if historical_data else []
+
+    # Enough consecutive hourly rows that lag(12) + rolling(24) survive dropna.
+    seq_len = 30
+    base_hour = 12
+    base_dow = 1
+    base_month = 9
+
+    def base_record(t, temperature, humidity, pressure, wind_speed):
+        return {
+            'temperature': temperature,
+            'humidity': humidity,
+            'pressure': pressure,
+            'wind_speed': wind_speed,
+            'hour': (base_hour + t) % 24,
+            'day_of_week': base_dow,
+            'month': base_month,
+        }
+
+    # extreme_heat_heatwave: temperature >= 38
+    heat = [base_record(t, 42.0, 30.0, 1012.0, 3.0) for t in range(seq_len)]
+
+    # extreme_cold_frost: temperature <= 2
+    cold = [base_record(t, -5.0, 80.0, 1015.0, 4.0) for t in range(seq_len)]
+
+    # high_wind_storm: wind_speed >= 25
+    wind = [base_record(t, 20.0, 65.0, 1014.0, 32.0) for t in range(seq_len)]
+
+    # heavy_rain_flood: pressure < 1000 and pressure_trend_6h < -2
+    # (pressure falling ~1.5 hPa/hour)
+    flood = [
+        base_record(t, 20.0, 85.0, 1015.0 - 1.5 * t, 6.0) for t in range(seq_len)
+    ]
+
+    for scenario in (heat, cold, wind, flood):
+        augmented.extend(scenario)
+
+    return augmented
+
+
 def initialize_app():
     """Initialize the application"""
     print("Initializing Smart Weather System...")
@@ -2569,14 +2658,22 @@ def initialize_app():
     # Try to load existing AI model (Phase 1: Stacking Ensemble)
     if not weather_ai.load_model():
         print("Training new Stacking Ensemble model...")
-        # Train with available historical data from all locations
+        # Train with available historical data from all locations.
+        # Use a generous look-back window (1 year) for the *initial* training so
+        # the bundled demo data (which may be timestamped up to a year old) is
+        # actually eligible. The previous 168-hour (7-day) window excluded all
+        # of the seeded London records, so the model never trained.
+        TRAINING_WINDOW_HOURS = 8760
         conn = get_db_connection()
         if conn:
             try:
                 locations = conn.execute('SELECT DISTINCT location FROM users').fetchall()
                 for row in locations:
                     location = row['location']
-                    historical_data = get_historical_weather(location, 168)
+                    historical_data = get_historical_weather(location, TRAINING_WINDOW_HOURS)
+                    # Augment with synthetic extreme-event samples so every hazard
+                    # class is represented (the seed data is all "normal").
+                    historical_data = _augment_training_data(historical_data, location)
                     if len(historical_data) >= 20:
                         weather_ai.train(historical_data, location)
                         break

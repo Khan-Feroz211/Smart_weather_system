@@ -19,6 +19,7 @@
 - [Phase 4: Explainable AI (XAI)](#phase-4-explainable-ai-xai)
 - [Phase 5: Multi-Hazard Output & Crisis Communication](#phase-5-multi-hazard-output--crisis-communication)
 - [Phase 6: Edge-Case Hardening](#phase-6-edge-case-hardening)
+- [AgriAdvisor v6 Recommendation Engine](#agriadvisor-v6-recommendation-engine)
 - [API Endpoints](#api-endpoints)
 - [Running Tests](#running-tests)
 - [Configuration](#configuration)
@@ -120,6 +121,319 @@ A Stacking Ensemble Classifier combining four diverse base learners with a Logis
 ### Interaction Terms
 - Heat index (Temp * Humidity interaction)
 - Vapor Pressure Deficit (VPD)
+- Dew point depression
+- Growing Degree Days (GDD) accumulation
+- Pressure tendency (3-hour slope)
+
+**File**: `feature_engineering.py`
+
+**Key Features**:
+- Pipeline runs entirely on historical weather telemetry (SQLite)
+- Supports both single-row real-time prediction and batch feature generation
+- All engineered features persist to `weather_features` table for model training
+
+---
+
+## Phase 3: Time-Aware & Location-Aware Cross-Validation
+
+**File**: `evaluation.py`
+
+### Time-Aware Splitting
+- **Temporal split**: Training on earlier timestamps, testing on later ones (no future leakage)
+- **Rolling-origin cross-validation**: Expands the training window by one step at a time
+- **Gapped windows**: Optional gap between train and test to avoid look-ahead bias
+
+### Location-Aware Folding
+- **Spatial strata**: Locations grouped by agro-climatic zone (e.g., Punjab plains vs. Balochistan arid)
+- **Leave-Location-Out CV**: Each fold holds out an entire location to test spatial generalization
+- Zone-aware hazard priors computed from historical incident density
+
+**Key Metrics Tracked**:
+- ROC-AUC (macro, per-hazard)
+- Brier score (reliability of confidence estimates)
+- Calibration slope and intercept
+- Per-class F1, precision, recall
+
+---
+
+## Phase 4: Explainable AI (XAI)
+
+**File**: `xai_explainability.py`
+
+### SHAP (SHapley Additive exPlanations)
+- Global feature importance across the entire stacking ensemble
+- Per-prediction force plots identifying the top 3 contributing features
+- SHAP interaction values for feature-pair effects (e.g., Temp × Humidity)
+
+### LIME (Local Interpretable Model-agnostic Explanations)
+- Surrogate logistic-regression model around individual predictions
+- Generates human-readable rule lists ("IF temp > 35 AND humidity < 30 THEN high_fire_risk")
+
+### Explanation Output
+- Each prediction returns an `explanation` field with:
+  - Top contributing features and their directional impact
+  - A natural-language summary of why the hazard was flagged
+  - Confidence bounds derived from SHAP value stability
+
+---
+
+## Phase 5: Multi-Hazard Output & Crisis Communication
+
+**Files**: `multi_hazard.py`, `app_clean.py`
+
+### Multi-Hazard Aggregation
+- Simultaneous evaluation of **four hazards**: flood, drought, heatwave, fire/weather (winds)
+- Each hazard scored independently by the stacking ensemble, then fused via the meta-learner
+- Hazards with probability above a dynamic threshold are included in the active alert set
+
+### Risk Scoring & Tiering
+- **Risk levels**: `low`, `moderate`, `high`, `severe`, `extreme`
+- Color-coded alerts: green → yellow → orange → red → dark red
+- Lead-time estimation: "Warning valid for the next X hours"
+
+### Crisis Communication
+- **SocketIO live dashboard**: Real-time hazard updates pushed to the browser
+- **Push notifications**: Critical alerts trigger browser notifications
+- **SMS/email fallback**: Configurable SMTP gateway for offline-prone regions (requires `SMTP_*` env vars)
+- **Multilingual support**: Alerts rendered in English and Urdu (Pakistan-focused)
+
+---
+
+## Phase 6: Edge-Case Hardening
+
+**Files**: `edge_case_hardening_v2.py`, `integration_bridge.py`
+
+### Connectivity Degradation
+- **ONLINE**: Live weather API + satellite telemetry
+- **CACHE**: Last-known-good telemetry from 7-day fallback cache (stale-data penalties applied)
+- **OFFLINE**: Rule-based fallback mode — agricultural rules and defaults replace telemetry-dependent predictions
+
+### Components
+| Component | Function |
+|---|---|
+| `FallbackCacheSystem` | 7-day rolling cache of weather + satellite data |
+| `CacheMode` | Enum: ONLINE / CACHE / OFFLINE selection |
+| `ConfidencePenaltySystem` | Reduces confidence scores in proportion to data staleness and missing telemetry |
+| `GracefulDegradationManager` | Orchestrates fallback behavior across all subsystems |
+| `CircuitBreaker` | Circuit breaker for OpenWeather API failures |
+| `SystemBridge` | Connects recommendation engine to Phase 6 degradation logic |
+
+---
+
+## AgriAdvisor v6 Recommendation Engine
+
+**Engine Version**: `v6.1-geovis`
+
+A modular, offline-safe agricultural advisory system that orchestrates disease detection, yield estimation, crop suitability ranking, satellite analysis, and feedback-based confidence calibration. Built on top of the Phase 1–6 ML pipeline.
+
+### Module Overview
+
+| Module | File | Description |
+|---|---|---|
+| `disease_detection.py` | `DiseaseDetector` | Rule-based disease diagnosis (100% local) + ML-calibrated tier using isotonic regression |
+| `crop_database.py` | `CROP_DATABASE` | Static, offline-safe crop disease database (wheat rust, leaf blight, powdery mildew) |
+| `crop_suitability.py` | `rank_crops()` | Ranks crops for a site based on temperature and rainfall suitability |
+| `yield_estimator.py` | `YieldEstimator` | Estimates yield impact (%) from disease diagnoses and weather conditions |
+| `geovis_satellite.py` | `GeoVisSatelliteAnalyzer` | Satellite imagery analysis — NDVI, Soil Moisture Index, Canopy Thermal Stress |
+| `confidence_calibration.py` | `ConfidenceCalibrator` | Isotonic regression calibration (falls back to raw priors < 25 samples) |
+| `entropy_utils.py` | `compute_entropy()` / `suggest_next_question()` | Shannon entropy computation and active-symptom selection |
+| `feedback_store.py` | `AccuracyMonitor` | Local SQLite storage for diagnostics, accuracy metrics, and user feedback |
+| `integration_bridge.py` | `SystemBridge` | Bridges the engine to Phase 6 graceful-degradation logic |
+| `recommendation_engine.py` | `RecommendationEngine` | Top-level orchestrator combining all modules |
+| `api_routes.py` | `agri_bp` (Flask Blueprint) | REST API endpoints for the recommendation engine |
+
+### Connectivity-Aware Behavior
+All modules respect a `connectivity_state` of `ONLINE`, `CACHE`, or `OFFLINE`:
+- **ONLINE**: Full telemetry from weather API + satellite imagery
+- **CACHE**: Staleness warnings + confidence penalties
+- **OFFLINE**: Rule-based diagnosis, satellite data withheld, yield/crop-suitability withheld with disclaimers
+
+### Example Usage
+```python
+from recommendation_engine import RecommendationEngine
+
+engine = RecommendationEngine()
+result = engine.analyze(
+    crop="wheat",
+    symptoms={"yellow_pustules": True, "leaf_lesions": True},
+    site={"temp": 22.0, "rainfall": 500.0, "month": 3},
+    stage="heading",
+    connectivity_state="ONLINE",
+    data_age_hours=0.0
+)
+print(result)
+```
+
+---
+
+## API Endpoints
+
+The application exposes two API layers:
+
+### Hazards Prediction API
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/hazards/predict` | Predict multi-hazard risk from weather data |
+| GET | `/api/hazards/dashboard` | Aggregated hazard dashboard data |
+
+### AgriAdvisor v6 API
+**Blueprint**: `agri_bp` — mounted under `/api/agri/`
+
+| Method | Endpoint | Description |
+|---|---|---|
+| POST, GET | `/api/agri/analyze` | Analyze crop symptoms and site conditions; returns disease diagnosis, yield impact, crop suitability, and satellite data |
+| POST | `/api/agri/feedback` | Submit user feedback on a prediction (correct/incorrect) for accuracy monitoring |
+| GET | `/api/agri/status` | Engine status, version, and accuracy metrics |
+
+#### `/api/agri/analyze` Request Body
+```json
+{
+  "crop": "wheat",
+  "symptoms": {"yellow_pustules": true, "leaf_lesions": true},
+  "site": {"temp": 22.0, "rainfall": 500.0, "month": 3},
+  "stage": "heading",
+  "connectivity_state": "ONLINE",
+  "data_age_hours": 0.0
+}
+```
+
+#### `/api/agri/analyze` Response
+```json
+{
+  "engine_version": "v6.1-geovis",
+  "crop": "wheat",
+  "diagnoses": [...],
+  "yield_estimate": {...},
+  "crop_suitability": {...},
+  "satellite_data": {...},
+  "uncertainty": {...}
+}
+```
+
+---
+
+## Running Tests
+
+The project uses Python's built-in `unittest` framework (compatible with `pytest`).
+
+```bash
+# Run all tests
+python -m pytest tests/ -v
+
+# Or with unittest
+python -m unittest discover -s tests -v
+
+# Check that the Flask app initializes and list all routes
+python check_routes.py
+```
+
+Test coverage includes:
+- Offline-safe disease detection (rule-based tier)
+- Geovis satellite analyzer across ONLINE/CACHE/OFFLINE modes
+- Yield estimator and crop suitability connectivity degradation
+- RecommendationEngine output formatting and engine-status header precision
+- Flask API routes integration (`/api/agri/analyze`, `/api/agri/feedback`, `/api/agri/status`)
+
+---
+
+## Configuration
+
+Configuration is managed via environment variables (see `.env.example`):
+
+| Variable | Default | Description |
+|---|---|---|
+| `SECRET_KEY` | — | Flask secret key for session security |
+| `OPENWEATHER_API_KEY` | `demo_key_12345` | OpenWeatherMap API key for live weather data |
+| `DEBUG` | `True` | Enable Flask debug mode |
+| `SENSOR_MODE` | `simulation` | `simulation` (mock sensors) or `real` (live sensor ingestion) |
+| `AGRI_DB_PATH` | `smart_weather.db` | SQLite database path for AgriAdvisor feedback storage |
+
+### Environment Variables Reference
+```bash
+# .env
+SECRET_KEY=your_secret_key_here
+OPENWEATHER_API_KEY=your_openweather_api_key
+DEBUG=False
+SENSOR_MODE=simulation
+AGRI_DB_PATH=smart_weather.db
+```
+
+### Docker
+```bash
+docker-compose up --build
+```
+Services: web (Flask), mosquitto (MQTT broker), and supporting infrastructure.
+
+---
+
+## Troubleshooting
+
+### "OpenWeather API error" / No weather data
+- Verify `OPENWEATHER_API_KEY` is set correctly in `.env`
+- The system will automatically fall back to **CACHE** mode (last-known data) with confidence penalties, or **OFFLINE** mode (rules only)
+- Check `app_server.log` for API error details
+
+### "smart_weather.db not found"
+- Run `python app_clean.py` once to initialize the database
+- Or run `python check_routes.py` which calls `initialize_app()`
+
+### LightGBM crashes on Windows
+- The stacking ensemble has per-learner try/except fallback
+- If LightGBM fails, Random Forest, XGBoost, and ELM continue to provide predictions
+- Install with `pip install lightgbm` or remove from the ensemble
+
+### Satellite data shows "not available offline"
+- This is expected in OFFLINE mode — satellite imagery requires network access
+- CACHE mode returns the last-known satellite metrics with a staleness warning
+
+### Flask won't start / port 8000 in use
+```bash
+netstat -ano | findstr :8000
+taskkill /PID <PID> /F
+```
+
+---
+
+## Contributing
+
+Contributions are welcome! Please follow these guidelines:
+
+1. **Fork** the repository and create a feature branch:
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+2. **Make changes** with clear, descriptive commit messages
+3. **Run tests** before submitting:
+   ```bash
+   python -m pytest tests/ -v
+   ```
+4. **Submit a pull request** with a clear description of changes
+
+### Development Setup
+```bash
+git clone https://github.com/Khan-Feroz211/Smart_weather_system.git
+cd Smart_weather_system
+python -m venv .venv
+.venv\Scripts\activate  # Windows
+source .venv/bin/activate  # Linux/macOS
+pip install -r requirements.txt
+python app_clean.py
+```
+
+---
+
+## License
+
+This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+
+---
+
+## Acknowledgements
+
+- **OpenWeatherMap** — Weather data API
+- **Geovis** — Satellite imagery analysis
+- **SHAP/LIME communities** — Explainable AI tooling
+- **Pakistan agricultural research community** — Domain expertise and use-case guidance
 - Dew point calculation
 - Air density proxy (Pressure / Temperature)
 - Wind chill
