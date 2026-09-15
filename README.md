@@ -2068,6 +2068,4 @@ This project demonstrates:
 
 ---
 
-**Built with ❤️ for 3rd Semester PBL Project**
-
-*Last Updated: December 2024*
+**Built with ❤️ for Farmers of Pakistan.
