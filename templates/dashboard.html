@@ -56,54 +56,63 @@
     <div class="row g-4">
         <!-- Current Weather -->
         <div class="col-lg-6">
-            <div class="card-futuristic">
-                <div class="card-header glass-effect">
-                    <h5 class="card-title mb-0">
-                        <i class="fas fa-location-dot me-2"></i>Current Weather - Lahore
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <div class="row text-center">
-                        <div class="col-4">
-                            <div class="weather-icon">
-                                <i class="fas fa-sun"></i>
-                            </div>
-                            <h4 id="current-temp-display" class="temperature temp-mild">20.5°C</h4>
-                            <small class="text-muted" id="current-condition">Sunny</small>
+            <div class="weather-hero mb-4">
+                <div class="d-flex justify-content-between align-items-start position-relative">
+                    <div>
+                        <div class="weather-hero-location">
+                            <i class="fas fa-location-dot"></i> Lahore, Pakistan
                         </div>
-                        <div class="col-8">
-                            <div class="row">
-                                <div class="col-6 mb-3">
-                                    <small class="text-muted">Humidity</small>
-                                    <div class="fw-bold" id="current-humidity">65%</div>
-                                </div>
-                                <div class="col-6 mb-3">
-                                    <small class="text-muted">Wind</small>
-                                    <div class="fw-bold" id="current-wind">15 km/h</div>
-                                </div>
-                                <div class="col-6">
-                                    <small class="text-muted">Pressure</small>
-                                    <div class="fw-bold" id="current-pressure">1013 hPa</div>
-                                </div>
-                                <div class="col-6">
-                                    <small class="text-muted">Feels Like</small>
-                                    <div class="fw-bold">21°C</div>
-                                </div>
-                            </div>
+                        <h2 id="current-temp-display" class="weather-hero-temp temperature temp-mild mb-0 mt-1">20.5°C</h2>
+                        <div class="weather-hero-condition" id="current-condition">Sunny</div>
+                    </div>
+                    <div class="weather-hero-icon">
+                        <i class="fas fa-sun"></i>
+                    </div>
+                </div>
+
+                <div class="row row-cols-4 g-2 mt-4 position-relative">
+                    <div class="col">
+                        <div class="weather-metric-chip">
+                            <i class="fas fa-temperature-half"></i>
+                            <div class="metric-chip-label">Feels Like</div>
+                            <div class="metric-chip-value">21°C</div>
                         </div>
                     </div>
-                    
-                    <!-- AI Prediction -->
-                    <div class="mt-3 p-3 glass-effect rounded">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <small class="text-muted">AI PREDICTION (1 hour)</small>
-                                <div id="ai-prediction" class="fw-bold">22.1°C (85% confidence)</div>
-                                <div id="ai-quality" class="small text-muted mt-1">Quality: pending</div>
-                                <div id="ai-decision" class="small text-warning mt-1">Decision: evaluating...</div>
-                            </div>
-                            <i class="fas fa-robot text-primary"></i>
+                    <div class="col">
+                        <div class="weather-metric-chip">
+                            <i class="fas fa-droplet"></i>
+                            <div class="metric-chip-label">Humidity</div>
+                            <div class="metric-chip-value" id="current-humidity">65%</div>
                         </div>
+                    </div>
+                    <div class="col">
+                        <div class="weather-metric-chip">
+                            <i class="fas fa-wind"></i>
+                            <div class="metric-chip-label">Wind</div>
+                            <div class="metric-chip-value" id="current-wind">15 km/h</div>
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="weather-metric-chip">
+                            <i class="fas fa-gauge-high"></i>
+                            <div class="metric-chip-label">Pressure</div>
+                            <div class="metric-chip-value" id="current-pressure">1013 hPa</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Prediction -->
+            <div class="card-futuristic">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <small class="text-muted">AI PREDICTION (1 hour)</small>
+                            <div id="ai-prediction" class="fw-bold fs-5">22.1°C (85% confidence)</div>
+                            <div id="ai-quality" class="small text-muted mt-1">Quality: pending</div>
+                            <div id="ai-decision" class="small mt-1" style="color: var(--warning);">Decision: evaluating...</div>
+                        </div>
+                        <i class="fas fa-robot fs-2" style="color: var(--primary);"></i>
                     </div>
                 </div>
             </div>

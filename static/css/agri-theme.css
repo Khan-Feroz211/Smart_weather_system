@@ -3,44 +3,44 @@
  * Research-Grade Agriculture System Theme
  */
 
-/* Color Variables */
+/* Color Variables — Modern Weather Dashboard Palette */
 :root {
-    /* Primary - Deep Forest */
-    --color-primary: #064E3B;
-    --color-primary-light: #0a6b52;
-    --color-primary-dark: #043a2c;
+    /* Primary - Sky Blue */
+    --color-primary: #2563EB;
+    --color-primary-light: #3B82F6;
+    --color-primary-dark: #1D4ED8;
     
-    /* Secondary - Safety Amber */
-    --color-secondary: #D97706;
-    --color-secondary-light: #f59e0b;
-    --color-secondary-dark: #b45309;
+    /* Secondary - Sunshine Amber */
+    --color-secondary: #F59E0B;
+    --color-secondary-light: #FBBF24;
+    --color-secondary-dark: #D97706;
     
-    /* Surface - Clinical White */
-    --color-surface: #F8FAFC;
-    --color-surface-alt: #f1f5f9;
+    /* Surface - Soft Sky */
+    --color-surface: #F4F8FC;
+    --color-surface-alt: #E8F1FB;
     
-    /* Data Visualization - Bio-Teal */
-    --color-teal: #0d9488;
-    --color-teal-light: #2dd4bf;
-    --color-teal-dark: #0f766e;
+    /* Data Visualization - Cyan */
+    --color-teal: #06B6D4;
+    --color-teal-light: #22D3EE;
+    --color-teal-dark: #0891B2;
     
-    /* Typography - Slate Ink */
-    --color-text: #1E293B;
+    /* Typography - Deep Navy Ink */
+    --color-text: #0F172A;
     --color-text-muted: #64748b;
     --color-text-light: #94a3b8;
     
     /* Status Colors */
-    --color-success: #22c55e;
-    --color-warning: #D97706;
+    --color-success: #22C55E;
+    --color-warning: #F97316;
     --color-danger: #ef4444;
-    --color-info: #3b82f6;
+    --color-info: #06B6D4;
 }
 
 /* Typography */
 body {
     background-color: var(--color-surface);
     color: var(--color-text);
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     font-size: 16px;
     line-height: 1.6;
 }
@@ -105,23 +105,23 @@ body {
 
 /* Card Styles */
 .card {
-    background-color: white;
-    border: none;
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(6, 78, 59, 0.08);
+    background-color: var(--color-surface-card, #fff);
+    border: 1px solid rgba(37, 99, 235, 0.08);
+    border-radius: 16px;
+    box-shadow: 0 4px 18px rgba(15, 23, 42, 0.06);
     transition: all 0.3s ease;
 }
 
 .card:hover {
-    box-shadow: 0 4px 16px rgba(6, 78, 59, 0.12);
+    box-shadow: 0 10px 28px rgba(37, 99, 235, 0.12);
     transform: translateY(-2px);
 }
 
 .card-header {
-    background-color: var(--color-surface);
-    border-bottom: 1px solid var(--color-surface-alt);
-    border-radius: 12px 12px 0 0 !important;
-    padding: 1rem 1.5rem;
+    background-color: transparent;
+    border-bottom: 1px solid rgba(37, 99, 235, 0.08);
+    border-radius: 16px 16px 0 0 !important;
+    padding: 1.1rem 1.5rem;
 }
 
 .card-title {
@@ -458,9 +458,9 @@ body {
 
 /* Dark Mode Support */
 [data-bs-theme="dark"] {
-    --color-surface: #0f172a;
-    --color-surface-alt: #1e293b;
-    --color-text: #f1f5f9;
+    --color-surface: #0B1220;
+    --color-surface-alt: #16213A;
+    --color-text: #F1F5F9;
     --color-text-muted: #94a3b8;
     --color-text-light: #64748b;
 }

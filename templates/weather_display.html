@@ -5,17 +5,20 @@
 {% block content %}
 <div class="container">
     <!-- Header -->
-    <div class="row mb-4">
+    <div class="row mb-4 align-items-center">
         <div class="col">
             <h1 class="display-5 fw-bold text-glow mb-2">
                 <i class="fas fa-map-marker-alt me-2"></i>Live Weather Display
             </h1>
-            <p class="text-muted">Real-time weather data from multiple locations</p>
+            <p class="text-muted mb-0">Real-time weather data from multiple locations</p>
         </div>
         <div class="col-auto">
-            <div class="input-group">
-                <input type="text" class="form-control bg-dark text-light border-secondary" 
-                       placeholder="Search location..." id="locationSearch">
+            <div class="input-group search-input-group" style="min-width: 320px;">
+                <span class="input-group-text bg-transparent border-0 pe-0">
+                    <i class="fas fa-magnifying-glass" style="color: var(--text-muted);"></i>
+                </span>
+                <input type="text" class="form-control border-0"
+                       placeholder="Search a city or town..." id="locationSearch">
                 <button class="btn btn-futuristic" onclick="searchLocation()">
                     <i class="fas fa-search"></i>
                 </button>
@@ -76,10 +79,10 @@
         const col = document.createElement('div');
         col.className = 'col-md-6 col-lg-4';
         col.innerHTML = `
-            <div class="card-futuristic weather-card" data-location="${location}">
-                <div class="card-header glass-effect">
+            <div class="card-futuristic weather-card h-100" data-location="${location}">
+                <div class="card-header glass-effect d-flex align-items-center justify-content-between">
                     <h5 class="card-title mb-0">
-                        <i class="fas fa-map-marker-alt me-2 text-danger"></i>${location}
+                        <i class="fas fa-location-dot me-2" style="color: var(--danger);"></i>${location}
                     </h5>
                 </div>
                 <div class="card-body">
@@ -87,32 +90,41 @@
                         <div class="weather-icon">
                             <i class="fas fa-cloud fa-2x"></i>
                         </div>
-                        <h2 class="temperature temp-mild mt-2">--°C</h2>
-                        <p class="weather-condition text-muted">Loading...</p>
+                        <h2 class="temperature temp-mild mt-2 mb-0" style="font-size: 2.25rem;">--°C</h2>
+                        <p class="weather-condition text-muted mb-0">Loading...</p>
                     </div>
-                    
-                    <div class="row text-center">
-                        <div class="col-4">
-                            <small class="text-muted">Humidity</small>
-                            <div class="fw-bold humidity">--%</div>
+
+                    <div class="row row-cols-3 g-2 text-center">
+                        <div class="col">
+                            <div class="weather-metric-chip light">
+                                <i class="fas fa-droplet"></i>
+                                <div class="metric-chip-label">Humidity</div>
+                                <div class="metric-chip-value humidity">--%</div>
+                            </div>
                         </div>
-                        <div class="col-4">
-                            <small class="text-muted">Wind</small>
-                            <div class="fw-bold wind">-- km/h</div>
+                        <div class="col">
+                            <div class="weather-metric-chip light">
+                                <i class="fas fa-wind"></i>
+                                <div class="metric-chip-label">Wind</div>
+                                <div class="metric-chip-value wind">-- km/h</div>
+                            </div>
                         </div>
-                        <div class="col-4">
-                            <small class="text-muted">Pressure</small>
-                            <div class="fw-bold pressure">-- hPa</div>
+                        <div class="col">
+                            <div class="weather-metric-chip light">
+                                <i class="fas fa-gauge-high"></i>
+                                <div class="metric-chip-label">Pressure</div>
+                                <div class="metric-chip-value pressure">-- hPa</div>
+                            </div>
                         </div>
                     </div>
-                    
+
                     <div class="mt-3 p-2 glass-effect rounded">
                         <small class="text-muted">AI PREDICTION (1h)</small>
                         <div class="fw-bold prediction">Collecting data...</div>
                     </div>
                 </div>
                 <div class="card-footer bg-transparent border-top-0">
-                    <small class="text-muted update-time">Last update: --</small>
+                    <small class="text-muted update-time"><i class="fas fa-rotate me-1"></i>Last update: --</small>
                 </div>
             </div>
         `;
