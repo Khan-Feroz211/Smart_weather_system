@@ -51,6 +51,95 @@ python app_clean.py
 
 ---
 
+## Project Structure
+
+```text
+Smart_weather_system/
+├── app_clean.py              # Main Flask + SocketIO web server
+├── api_routes.py             # AgriAdvisor REST API blueprint (/api/agri/)
+├── check_routes.py           # Route health-check / smoke test
+├── requirements.txt          # Pinned Python dependencies
+├── docker-compose.yml        # web + mosquitto (MQTT) services
+├── Dockerfile
+├── run_app.bat / start.bat   # Windows launch helpers
+│
+├── data/                     # Bundled research datasets (Git LFS)
+│   ├── __init__.py
+│   ├── dataset_loader.py     # Offline-safe dataset loader
+│   └── agriculture_dataset.csv
+│
+├── notebooks/                # Research / experimentation notebooks (Git LFS)
+│   └── leaf-disease-fine-tuning.ipynb
+│
+├── docs/                     # Reference papers and guides (Git LFS)
+│   └── sensors-25-07098-v2.pdf
+│
+├── templates/                # Jinja2 HTML templates
+├── static/                   # CSS / JS / favicon assets
+├── mosquitto/                # MQTT broker config & data
+│
+├── stacking_ensemble.py      # Phase 1 — Stacking ensemble classifier
+├── feature_engineering.py    # Phase 2 — Temporal & interaction features
+├── evaluation.py             # Phase 3 — CV splitting & metrics
+├── xai_explainability.py     # Phase 4 — SHAP + LIME
+├── multi_hazard.py           # Phase 5 — Multi-hazard aggregation/alerts
+├── edge_case_hardening_v2.py # Phase 6 — Offline/CACHE/ONLINE degradation
+├── integration_bridge.py
+├── recommendation_engine.py  # AgriAdvisor v6 orchestrator
+├── disease_detection.py
+├── crop_database.py
+├── crop_suitability.py
+├── yield_estimator.py
+├── geovis_satellite.py
+├── confidence_calibration.py
+├── entropy_utils.py
+├── feedback_store.py
+├── sensor_ingestion.py
+├── sensor_simulation.py
+├── trend_visualization.py
+└── tests/                    # Unit + integration tests
+```
+
+> Large binary/data files (`.csv`, `.pdf`, `.ipynb`, model weights) are tracked
+> with [Git LFS](https://git-lfs.com/). After cloning, run
+> `git lfs install && git lfs pull` to materialise them.
+
+---
+
+## Research Assets & Datasets
+
+The following research artifacts are bundled with the project (tracked via Git LFS,
+see the `data/`, `notebooks/`, and `docs/` directories):
+
+### Datasets
+
+| Asset | Location | Size | Description |
+|---|---|---|---|
+| `agriculture_dataset.csv` | `data/` | ~75 MB | 212,019-row remote-sensing + weather + soil crop-health dataset (Wheat / Maize / Rice). Target: `Crop_Health_Label` (binary). 31 feature columns (NDVI, SAVI, Chlorophyll, Leaf Area Index, weather, soil, pest/weed pressure). |
+
+**Programmatic access** (offline-safe, no network):
+```python
+from data import load_agriculture_dataset, dataset_info
+
+dataset_info()                       # summary of rows / crops / label split
+df = load_agriculture_dataset(crop_type="Wheat", sample=1000)
+# df has 32 columns; target column is "Crop_Health_Label"
+```
+
+### Notebooks
+
+| Asset | Location | Description |
+|---|---|---|
+| `leaf-disease-fine-tuning.ipynb` | `notebooks/` | Kaggle-style experiment notebook that fine-tunes image classifiers (ResNet-50 / Swin-Tiny / ViT) for plant-disease detection using `kagglehub`, `transformers`, and `timm`. Reference for the image-based disease-detection tier. Note: it uses Kaggle paths (`/kaggle/input`, `/kaggle/working`), so run it inside a Kaggle/Colab kernel or adapt the dataset paths. |
+
+### Reference Papers
+
+| Asset | Location | Description |
+|---|---|---|
+| `sensors-25-07098-v2.pdf` | `docs/` | MDPI *Sensors* journal paper (Vol. 25, Issue 7098) referenced by the satellite/NDVI analysis layer (`geovis_satellite.py`). |
+
+---
+
 ## System Architecture
 
 ```
