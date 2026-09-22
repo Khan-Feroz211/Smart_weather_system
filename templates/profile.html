@@ -1,0 +1,317 @@
+{% extends "base.html" %}
+
+{% block title %}{{ user.username }} - Profile{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="display-5 fw-bold text-glow mb-2">
+                        <i class="fas fa-user me-2"></i>{{ user.username }}
+                    </h1>
+                    <p class="text-muted">
+                        <i class="fas fa-map-marker-alt me-1 text-danger"></i>
+                        {{ user.location }} • 
+                        <i class="fas fa-envelope me-1 text-primary"></i>
+                        {{ user.email }}
+                    </p>
+                </div>
+                <div class="text-end">
+                    <div class="ai-status trained">
+                        <i class="fas fa-robot me-1"></i>
+                        AI Active
+                    </div>
+                    <small class="text-muted">Member since {{ user.created_at[:10] }}</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- User Info & Preferences -->
+        <div class="col-lg-4">
+            <!-- User Card -->
+            <div class="card-futuristic mb-4">
+                <div class="card-header glass-effect">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-id-card me-2"></i>User Information
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="text-center mb-3">
+                        <div class="bg-primary rounded-circle d-flex align-items-center justify-content-center mx-auto" 
+                             style="width: 80px; height: 80px;">
+                            <i class="fas fa-user text-white fa-2x"></i>
+                        </div>
+                        <h4 class="mt-3 mb-1">{{ user.username }}</h4>
+                        <p class="text-muted">{{ user.email }}</p>
+                    </div>
+                    
+                    <div class="list-group list-group-flush">
+                        <div class="list-group-item bg-transparent text-light border-secondary d-flex justify-content-between">
+                            <span><i class="fas fa-map-marker-alt me-2 text-danger"></i>Location</span>
+                            <strong>{{ user.location }}</strong>
+                        </div>
+                        <div class="list-group-item bg-transparent text-light border-secondary d-flex justify-content-between">
+                            <span><i class="fas fa-calendar me-2 text-info"></i>Member Since</span>
+                            <strong>{{ user.created_at[:10] }}</strong>
+                        </div>
+                        <div class="list-group-item bg-transparent text-light border-secondary d-flex justify-content-between">
+                            <span><i class="fas fa-bell me-2 text-warning"></i>Active Alerts</span>
+                            <span class="badge bg-warning rounded-pill">{{ alerts|length }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Weather Preferences -->
+            <div class="card-futuristic">
+                <div class="card-header glass-effect">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-sliders-h me-2"></i>Weather Preferences
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if preferences %}
+                    <div class="mb-3">
+                        <small class="text-muted">Temperature Range</small>
+                        <div class="fw-bold">
+                            {{ preferences.temperature_min }}°C - {{ preferences.temperature_max }}°C
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <small class="text-muted">Preferred Activities</small>
+                        <div>
+                            {% for activity in preferences.preferred_activities %}
+                            <span class="badge bg-primary me-1 mb-1">{{ activity }}</span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <small class="text-muted">Avoidance Settings</small>
+                        <div>
+                            {% if preferences.avoid_rain %}
+                            <span class="badge bg-info me-1 mb-1">Avoid Rain</span>
+                            {% endif %}
+                            {% if preferences.avoid_extreme_heat %}
+                            <span class="badge bg-warning me-1 mb-1">Avoid Extreme Heat</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="text-center text-muted py-3">
+                        <i class="fas fa-sliders-h fa-2x mb-2"></i>
+                        <p>No preferences set</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="col-lg-8">
+            <!-- Current Weather -->
+            <div class="card-futuristic mb-4">
+                <div class="card-header glass-effect">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-cloud-sun me-2"></i>Current Weather in {{ user.location }}
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if weather_data %}
+                        {% set current_weather = weather_data[0] %}
+                        <div class="row align-items-center">
+                            <div class="col-md-4 text-center">
+                                <div class="weather-icon mb-2">
+                                    <i class="fas fa-{{ 'sun' if 'Sunny' in current_weather.weather_condition else 'cloud' if 'Cloud' in current_weather.weather_condition else 'cloud-rain' }} fa-3x"></i>
+                                </div>
+                                <h2 class="temperature temp-{{ 'cold' if current_weather.temperature < 10 else 'mild' if current_weather.temperature < 20 else 'warm' }} mb-0">
+                                    {{ "%.1f"|format(current_weather.temperature) }}°C
+                                </h2>
+                                <p class="text-muted">{{ current_weather.weather_condition }}</p>
+                            </div>
+                            <div class="col-md-8">
+                                <div class="row">
+                                    <div class="col-6 mb-3">
+                                        <small class="text-muted">Humidity</small>
+                                        <div class="fw-bold">{{ current_weather.humidity }}%</div>
+                                    </div>
+                                    <div class="col-6 mb-3">
+                                        <small class="text-muted">Wind Speed</small>
+                                        <div class="fw-bold">{{ current_weather.wind_speed }} km/h</div>
+                                    </div>
+                                    <div class="col-6">
+                                        <small class="text-muted">Pressure</small>
+                                        <div class="fw-bold">{{ current_weather.pressure }} hPa</div>
+                                    </div>
+                                    <div class="col-6">
+                                        <small class="text-muted">Last Updated</small>
+                                        <div class="fw-bold">{{ current_weather.recorded_at[11:16] }}</div>
+                                    </div>
+                                </div>
+                                
+                                <!-- AI Recommendation -->
+                                <div class="mt-3 p-3 glass-effect rounded">
+                                    <div class="d-flex align-items-center">
+                                        <i class="fas fa-robot text-primary me-3 fa-lg"></i>
+                                        <div>
+                                            <small class="text-muted">AI RECOMMENDATION</small>
+                                            <div class="fw-bold">
+                                                {% if current_weather.temperature > preferences.temperature_max %}
+                                                Stay indoors, temperature is high
+                                                {% elif current_weather.temperature < preferences.temperature_min %}
+                                                Wear warm clothing
+                                                {% else %}
+                                                Perfect weather for {{ preferences.preferred_activities[0] if preferences.preferred_activities else 'outdoor activities' }}
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    {% else %}
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-cloud fa-2x mb-2"></i>
+                            <p>No weather data available</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Recent Activities & Alerts -->
+            <div class="row g-4">
+                <!-- Recent Activities -->
+                <div class="col-md-6">
+                    <div class="card-futuristic h-100">
+                        <div class="card-header glass-effect">
+                            <h5 class="card-title mb-0">
+                                <i class="fas fa-history me-2"></i>Recent Activities
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            {% if activities %}
+                                {% for activity in activities %}
+                                <div class="d-flex align-items-center border-bottom pb-2 mb-2">
+                                    <div class="flex-shrink-0">
+                                        <div class="bg-success rounded-circle d-flex align-items-center justify-content-center" 
+                                             style="width: 32px; height: 32px;">
+                                            <i class="fas fa-{{ 'running' if activity.activity_type == 'Running' else 'book' if activity.activity_type == 'Reading' else 'biking' }} text-white small"></i>
+                                        </div>
+                                    </div>
+                                    <div class="flex-grow-1 ms-3">
+                                        <div class="fw-bold">{{ activity.activity_type }}</div>
+                                        <small class="text-muted">{{ activity.weather_condition }} • {{ activity.duration_minutes }}min</small>
+                                    </div>
+                                    <div class="flex-shrink-0 text-end">
+                                        <div class="text-warning">
+                                            {% for i in range(activity.satisfaction_rating) %}
+                                            <i class="fas fa-star"></i>
+                                            {% endfor %}
+                                        </div>
+                                        <small class="text-muted">{{ activity.activity_date[5:16] }}</small>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            {% else %}
+                                <div class="text-center text-muted py-3">
+                                    <i class="fas fa-history fa-2x mb-2"></i>
+                                    <p>No activities logged</p>
+                                    <button class="btn btn-futuristic btn-sm">
+                                        <i class="fas fa-plus me-1"></i>Log Activity
+                                    </button>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Weather Alerts -->
+                <div class="col-md-6">
+                    <div class="card-futuristic h-100">
+                        <div class="card-header glass-effect">
+                            <h5 class="card-title mb-0">
+                                <i class="fas fa-bell me-2"></i>Weather Alerts
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            {% if alerts %}
+                                {% for alert in alerts %}
+                                <div class="alert alert-{{ 'danger' if alert.severity == 'High' else 'warning' if alert.severity == 'Medium' else 'info' }} glass-effect mb-2">
+                                    <div class="d-flex align-items-center">
+                                        <i class="fas fa-{{ 'exclamation-triangle' if alert.severity == 'High' else 'bell' }} me-2"></i>
+                                        <div class="flex-grow-1">
+                                            <strong>{{ alert.alert_type }}</strong>
+                                            <div class="small">{{ alert.message }}</div>
+                                        </div>
+                                        <small class="text-muted">{{ alert.created_at[:10] }}</small>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            {% else %}
+                                <div class="text-center text-muted py-3">
+                                    <i class="fas fa-bell-slash fa-2x mb-2"></i>
+                                    <p>No active alerts</p>
+                                    <button class="btn btn-futuristic btn-sm" data-bs-toggle="modal" data-bs-target="#addAlertModal">
+                                        <i class="fas fa-plus me-1"></i>Add Alert
+                                    </button>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Add Alert Form -->
+            <div class="modal fade" id="addAlertModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content card-futuristic">
+                        <div class="modal-header glass-effect">
+                            <h5 class="modal-title">Add Weather Alert</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <form method="POST" action="{{ url_for('add_alert', user_id=user.user_id) }}">
+                                <div class="mb-3">
+                                    <label class="form-label">Alert Type</label>
+                                    <select class="form-select bg-dark text-light border-secondary" name="alert_type" required>
+                                        <option value="Temperature">Temperature Alert</option>
+                                        <option value="Wind">Wind Alert</option>
+                                        <option value="Rain">Rain Alert</option>
+                                        <option value="Storm">Storm Alert</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Severity</label>
+                                    <select class="form-select bg-dark text-light border-secondary" name="severity" required>
+                                        <option value="Low">Low</option>
+                                        <option value="Medium">Medium</option>
+                                        <option value="High">High</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Message</label>
+                                    <textarea class="form-control bg-dark text-light border-secondary" name="message" rows="3" required placeholder="Enter alert message..."></textarea>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Temperature Threshold (°C)</label>
+                                    <input type="number" class="form-control bg-dark text-light border-secondary" name="temp_threshold" value="30" step="0.1">
+                                </div>
+                                <div class="d-flex justify-content-end">
+                                    <button type="button" class="btn btn-outline-secondary me-2" data-bs-dismiss="modal">Cancel</button>
+                                    <button type="submit" class="btn btn-futuristic">Add Alert</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

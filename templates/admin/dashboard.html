@@ -1,0 +1,79 @@
+{% extends "admin/_layout.html" %}
+{% from "admin/_macros.html" import stat_card, presence_pill %}
+{% block content %}
+{% set cards = [
+  {'id':'total_users','label':'Total Users','value':stats.total_users,'icon':'fa-users','tone':'primary','kind':'num'},
+  {'id':'active_users','label':'Active Users','value':stats.active_users,'icon':'fa-circle-dot','tone':'success','kind':'num','hint':'seen in the last ' ~ active_minutes ~ ' min'},
+  {'id':'new_users_today','label':'New Users Today','value':stats.new_users_today,'icon':'fa-user-plus','tone':'info','kind':'num'},
+  {'id':'weather_records','label':'Weather Records','value':stats.weather_records,'icon':'fa-cloud-sun','tone':'primary','kind':'num'},
+  {'id':'active_alerts','label':'Active Weather Alerts','value':stats.active_alerts,'icon':'fa-bell','tone':'danger','kind':'num'},
+  {'id':'total_farms','label':'Total Farms','value':stats.total_farms,'icon':'fa-tractor','tone':'success','kind':'num'},
+  {'id':'total_fields','label':'Total Fields','value':stats.total_fields,'icon':'fa-vector-square','tone':'warning','kind':'num'},
+  {'id':'active_sensors','label':'Active Sensors','value':stats.active_sensors,'icon':'fa-satellite-dish','tone':'info','kind':'num','hint':'reading within ' ~ sensor_minutes ~ ' min'},
+] %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="small text-muted"><span class="live-dot me-1"></span>Live figures from Supabase · refreshes every 30 s</div>
+  <button class="btn btn-sm btn-outline-secondary" id="refreshBtn"><i class="fa-solid fa-rotate me-1"></i>Refresh</button>
+</div>
+<div class="row g-3 mb-4">
+  {% for c in cards %}<div class="col-12 col-sm-6 col-xl-3">{{ stat_card(c) }}</div>{% endfor %}
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-lg-8"><div class="a-card h-100"><div class="a-card-h">Users registered &amp; weather records <small class="text-muted fw-normal">last 14 days</small></div>
+    <div class="a-card-b"><div class="chart-box tall"><canvas id="ovChart"></canvas></div></div></div></div>
+  <div class="col-lg-4"><div class="a-card h-100"><div class="a-card-h">Who is online</div>
+    <div class="a-card-b">
+      <div class="d-flex justify-content-between mb-2"><span>{{ presence_pill('active') }}</span><strong data-presence="active">{{ presence.active }}</strong></div>
+      <div class="d-flex justify-content-between mb-2"><span>{{ presence_pill('recent') }}</span><strong data-presence="recent">{{ presence.recent }}</strong></div>
+      <div class="d-flex justify-content-between mb-2"><span>{{ presence_pill('offline') }}</span><strong data-presence="offline">{{ presence.offline }}</strong></div>
+      <div class="d-flex justify-content-between mb-3"><span>{{ presence_pill('deactivated') }}</span><strong data-presence="deactivated">{{ presence.deactivated }}</strong></div>
+      <p class="small text-muted mb-3">Active = last heartbeat within {{ active_minutes }} min · Recently active = within {{ recent_minutes }} min.</p>
+      <a class="btn btn-sm btn-primary w-100" href="{{ url_for('admin.users_active') }}">View active users</a>
+    </div></div></div>
+</div>
+
+<div class="a-card"><div class="a-card-h">Recent activity <a class="small" href="{{ url_for('admin.activity') }}">View all</a></div>
+  <div class="a-card-b" id="activityList">
+    {% for a in activity %}
+      <div class="activity-item"><div class="avatar">{{ a.username[:1] | upper }}</div>
+        <div class="flex-grow-1"><strong>{{ a.username }}</strong> {{ a.text }}</div><small class="text-muted">{{ a.when }}</small></div>
+    {% else %}
+      <div class="empty-state"><i class="fa-regular fa-clock"></i>No activity recorded yet. Events appear once signed-in users use the site.</div>
+    {% endfor %}
+  </div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var ov;
+  function paint(d) {
+    ['total_users','active_users','new_users_today','weather_records','active_alerts','total_farms','total_fields','active_sensors'].forEach(function (k) {
+      var el = document.querySelector('[data-stat="' + k + '"]'); if (el && d[k] !== undefined) el.textContent = Number(d[k]).toLocaleString();
+    });
+    Object.keys(d.presence || {}).forEach(function (k) { var el = document.querySelector('[data-presence="' + k + '"]'); if (el) el.textContent = d.presence[k]; });
+  }
+  function refresh(quiet) {
+    AdminUI.get('/api/admin/stats').then(paint).catch(function (e) { if (!quiet) AdminUI.toast(e.message, 'error'); });
+    AdminUI.get('/api/admin/activity?limit=10').then(function (rows) {
+      var box = document.getElementById('activityList'); if (!rows.length) return;
+      box.innerHTML = '';
+      rows.forEach(function (a) {
+        var d = document.createElement('div'); d.className = 'activity-item';
+        d.innerHTML = '<div class="avatar"></div><div class="flex-grow-1"><strong></strong> <span></span></div><small class="text-muted"></small>';
+        d.querySelector('.avatar').textContent = (a.username || '?').charAt(0).toUpperCase();
+        d.querySelector('strong').textContent = a.username; d.querySelector('span').textContent = a.text; d.querySelector('small').textContent = a.when;
+        box.appendChild(d);
+      });
+    }).catch(function () {});
+  }
+  AdminUI.get('/api/admin/analytics?days=14').then(function (s) {
+    ov = AdminUI.chart('ovChart', 'line', s.users.labels, [
+      { label: 'New users', data: s.users.values }, { label: 'Weather records', data: s.weather.values, yAxisID: 'y1' }],
+      { scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { precision: 0 } } } });
+  }).catch(function (e) { document.getElementById('ovChart').parentNode.innerHTML = '<div class="empty-state"><i class="fa-solid fa-triangle-exclamation"></i>Could not load chart: ' + e.message + '</div>'; });
+  document.getElementById('refreshBtn').onclick = function () { refresh(false); };
+  setInterval(function () { if (!document.hidden) refresh(true); }, 30000);
+})();
+</script>
+{% endblock %}

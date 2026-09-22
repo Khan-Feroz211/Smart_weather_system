@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Agriculture Alerts – Smart AgriWeather{% endblock %}
+
+{% block content %}
+<div class="container">
+
+  <div class="row mb-4 align-items-center">
+    <div class="col">
+      <h1 class="display-6 fw-bold text-glow mb-1">
+        <i class="fas fa-triangle-exclamation me-2 text-warning"></i>Agriculture Alerts
+      </h1>
+      <p class="text-muted mb-0">Critical and operational advisories for all farms and fields</p>
+    </div>
+    <div class="col-auto">
+      <a href="{{ url_for('agri_dashboard') }}" class="btn btn-outline-info btn-futuristic">
+        <i class="fas fa-gauge me-1"></i> Dashboard
+      </a>
+    </div>
+  </div>
+
+  <!-- Summary badges -->
+  {% set critical_count = alerts|selectattr('severity','in',['critical','high'])|selectattr('is_active','equalto',1)|list|length %}
+  {% set active_count = alerts|selectattr('is_active','equalto',1)|list|length %}
+  <div class="d-flex gap-3 mb-4 flex-wrap">
+    <span class="badge bg-danger fs-6 px-3 py-2"><i class="fas fa-circle-exclamation me-1"></i>{{ critical_count }} Critical / High</span>
+    <span class="badge bg-warning text-dark fs-6 px-3 py-2"><i class="fas fa-bell me-1"></i>{{ active_count }} Active</span>
+    <span class="badge bg-secondary fs-6 px-3 py-2"><i class="fas fa-history me-1"></i>{{ (alerts|length) - active_count }} Dismissed</span>
+  </div>
+
+  {% if alerts %}
+  <div class="card-futuristic">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-futuristic mb-0">
+          <thead>
+            <tr>
+              <th>Severity</th>
+              <th>Type</th>
+              <th>Message</th>
+              <th>Field / Farm</th>
+              <th>Created</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for alert in alerts %}
+            <tr class="{{ 'table-danger bg-opacity-10' if alert.severity in ('critical','high') and alert.is_active else '' }}">
+              <td>
+                {% if alert.severity == 'critical' %}
+                  <span class="badge bg-danger">CRITICAL</span>
+                {% elif alert.severity == 'high' %}
+                  <span class="badge bg-danger">HIGH</span>
+                {% elif alert.severity == 'medium' %}
+                  <span class="badge bg-warning text-dark">MEDIUM</span>
+                {% else %}
+                  <span class="badge bg-info">LOW</span>
+                {% endif %}
+              </td>
+              <td class="fw-bold">{{ alert.alert_type }}</td>
+              <td>{{ alert.message }}</td>
+              <td>
+                {% if alert.field_name %}
+                  <div>📍 {{ alert.field_name }}</div>
+                {% endif %}
+                <small class="text-muted">{{ alert.farm_name or '–' }}</small>
+              </td>
+              <td><small class="text-muted">{{ alert.created_at[:16] if alert.created_at else '–' }}</small></td>
+              <td>
+                {% if alert.is_active %}
+                  <span class="badge bg-success">Active</span>
+                {% else %}
+                  <span class="badge bg-secondary">Dismissed</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if alert.is_active %}
+                <form method="POST" action="{{ url_for('dismiss_agri_alert', alert_id=alert.alert_id) }}">
+                  <button type="submit" class="btn btn-sm btn-outline-secondary">Dismiss</button>
+                </form>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {% else %}
+  <div class="card-futuristic">
+    <div class="card-body text-center py-5">
+      <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+      <h4 class="text-muted">No alerts found</h4>
+      <p class="text-muted">All fields are operating within safe parameters.</p>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- API Link -->
+  <div class="mt-4 card-futuristic">
+    <div class="card-body d-flex align-items-center gap-3">
+      <i class="fas fa-code fa-2x text-primary"></i>
+      <div class="flex-grow-1">
+        <div class="fw-bold">Advisories REST API</div>
+        <div class="text-muted small">Integrate with external systems using the JSON API endpoint.</div>
+      </div>
+      <a href="/api/agri/advisories" target="_blank" class="btn btn-primary btn-futuristic">
+        <i class="fas fa-external-link me-1"></i> /api/agri/advisories
+      </a>
+      <a href="/api/agri/analytics" target="_blank" class="btn btn-outline-info btn-futuristic">
+        <i class="fas fa-chart-pie me-1"></i> Analytics API
+      </a>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}{{ farm.name }} – Smart AgriWeather{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+
+  <!-- Header -->
+  <div class="row mb-4 align-items-center">
+    <div class="col">
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+          <li class="breadcrumb-item"><a href="{{ url_for('farms_list') }}" class="text-info">Farms</a></li>
+          <li class="breadcrumb-item active">{{ farm.name }}</li>
+        </ol>
+      </nav>
+      <h1 class="display-6 fw-bold text-glow mb-1">
+        <i class="fas fa-tractor me-2 text-success"></i>{{ farm.name }}
+      </h1>
+      <p class="text-muted mb-0">
+        <i class="fas fa-user me-1"></i>{{ farm.owner_name }} &nbsp;|&nbsp;
+        <i class="fas fa-location-dot me-1"></i>{{ farm.location }} &nbsp;|&nbsp;
+        <i class="fas fa-ruler-combined me-1"></i>{{ farm.total_area_ha }} ha
+      </p>
+    </div>
+    <div class="col-auto d-flex gap-2">
+      <a href="{{ url_for('add_field') }}?farm_id={{ farm.farm_id }}"
+         class="btn btn-success btn-futuristic">
+        <i class="fas fa-plus me-1"></i> Add Field
+      </a>
+    </div>
+  </div>
+
+  <!-- Active Farm Alerts -->
+  {% if farm_alerts %}
+  <div class="mb-4">
+    {% for alert in farm_alerts %}
+    <div class="alert alert-{{ 'danger' if alert.severity in ('critical','high') else 'warning' if alert.severity=='medium' else 'info' }} d-flex align-items-center justify-content-between py-2">
+      <div>
+        <strong>{{ alert.alert_type }}</strong>: {{ alert.message }}
+      </div>
+      <form method="POST" action="{{ url_for('dismiss_agri_alert', alert_id=alert.alert_id) }}" class="ms-3">
+        <button type="submit" class="btn btn-sm btn-outline-light">Dismiss</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Fields Table -->
+  <div class="card-futuristic">
+    <div class="card-header glass-effect">
+      <h5 class="mb-0"><i class="fas fa-map me-2 text-info"></i>Fields ({{ fields|length }})</h5>
+    </div>
+    <div class="card-body p-0">
+      {% if fields %}
+      <div class="table-responsive">
+        <table class="table table-futuristic mb-0">
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Crop / Season</th>
+              <th>Area (ha)</th>
+              <th>Soil / Irrigation</th>
+              <th>Health</th>
+              <th>Yield Forecast</th>
+              <th>Growth Stage</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for f in fields %}
+            <tr>
+              <td class="fw-bold">{{ f.name }}</td>
+              <td>
+                {% if f.crop_type %}
+                  <span class="badge bg-success">{{ f.crop_type }}</span>
+                  <div class="text-muted small">{{ f.season or '–' }}</div>
+                {% else %}
+                  <span class="text-muted">No crop</span>
+                {% endif %}
+              </td>
+              <td>{{ f.area_ha }}</td>
+              <td>
+                <span class="badge bg-secondary">{{ f.soil_type }}</span><br>
+                <small class="text-muted">{{ f.irrigation_type }}</small>
+              </td>
+              <td>
+                {% set hs = f.health_score or 0 %}
+                <span class="fw-bold {% if hs >= 75 %}text-success{% elif hs >= 50 %}text-warning{% else %}text-danger{% endif %}">
+                  {{ "%.0f"|format(hs) }}%
+                </span>
+              </td>
+              <td>
+                {% if f.expected_yield_ton_ha is not none %}
+                  <span class="text-success">{{ f.expected_yield_ton_ha }} t/ha</span>
+                  <span class="text-muted"> / {{ f.target_yield_ton_ha }} t/ha</span>
+                {% else %}–{% endif %}
+              </td>
+              <td>
+                <small class="text-muted">{{ f.growth_stage or '–' }}</small>
+              </td>
+              <td>
+                <a href="{{ url_for('field_detail', field_id=f.field_id) }}"
+                   class="btn btn-sm btn-outline-info">
+                  <i class="fas fa-eye"></i>
+                </a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="text-center py-5 text-muted">
+        <i class="fas fa-map fa-3x mb-3"></i>
+        <p>No fields yet. <a href="{{ url_for('add_field') }}?farm_id={{ farm.farm_id }}" class="text-success">Add a field</a> to start monitoring.</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+{% endblock %}

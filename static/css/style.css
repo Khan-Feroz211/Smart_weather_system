@@ -1,0 +1,771 @@
+/* ============================================================
+   Smart AgriWeather — Modern Weather Dashboard Theme
+   Light, vibrant, professional. Class names kept 1:1 with the
+   existing markup/JS so no functionality is affected — only the
+   visual language changes.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+    --primary: #2563EB;
+    --primary-dark: #1D4ED8;
+    --primary-light: #3B82F6;
+    --secondary: #06B6D4;
+    --accent: #F59E0B;
+    --success: #22C55E;
+    --warning: #F97316;
+    --danger: #EF4444;
+
+    --bg: #F4F8FC;
+    --bg-alt: #E8F1FB;
+    --card-bg: #FFFFFF;
+    --text: #0F172A;
+    --text-muted: #64748B;
+    --border-soft: rgba(37, 99, 235, 0.10);
+
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 18px;
+    --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.06);
+    --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08);
+    --shadow-lg: 0 16px 40px rgba(37, 99, 235, 0.14);
+
+    --neon-glow: 0 0 10px currentColor;
+}
+
+/* Dark mode token overrides — components below read these vars,
+   so flipping the palette here re-themes the whole app. */
+[data-bs-theme="dark"] {
+    --bg: #0B1220;
+    --bg-alt: #16213A;
+    --card-bg: #131B2E;
+    --text: #F1F5F9;
+    --text-muted: #94A3B8;
+    --border-soft: rgba(59, 130, 246, 0.18);
+}
+
+/* ============================================================
+   Base
+   ============================================================ */
+* {
+    box-sizing: border-box;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    background: var(--bg);
+    background-image:
+        radial-gradient(ellipse 900px 500px at 8% -10%, rgba(37, 99, 235, 0.08), transparent 60%),
+        radial-gradient(ellipse 700px 500px at 100% 0%, rgba(6, 182, 212, 0.08), transparent 55%);
+    background-attachment: fixed;
+    color: var(--text);
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+a {
+    text-decoration: none;
+}
+
+/* ============================================================
+   Navbar
+   ============================================================ */
+.navbar {
+    position: sticky;
+    top: 0;
+    z-index: 1030;
+    background: linear-gradient(115deg, var(--primary) 0%, var(--primary-dark) 100%) !important;
+    box-shadow: 0 4px 20px rgba(37, 99, 235, 0.18);
+    padding: 0.7rem 0;
+}
+
+.navbar-futuristic {
+    background: rgba(255, 255, 255, 0.95) !important;
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border-soft);
+    box-shadow: var(--shadow-sm);
+    padding: 0.75rem 0;
+}
+
+.navbar-brand {
+    font-weight: 800;
+    font-size: 1.3rem;
+    letter-spacing: -0.02em;
+    display: inline-flex;
+    align-items: center;
+}
+
+.navbar-brand i {
+    background: rgba(255, 255, 255, 0.18);
+    padding: 0.4rem;
+    border-radius: 10px;
+}
+
+.nav-link {
+    border-radius: 8px;
+    padding: 0.5rem 0.85rem !important;
+    font-weight: 500;
+    font-size: 0.925rem;
+}
+
+.nav-link:hover {
+    transform: translateY(-1px);
+}
+
+/* ============================================================
+   Cards
+   ============================================================ */
+.card-futuristic {
+    background: var(--card-bg);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 1rem;
+    color: var(--text);
+}
+
+.card-futuristic::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(37, 99, 235, 0.06), transparent);
+    transition: left 0.6s ease;
+    pointer-events: none;
+}
+
+.card-futuristic:hover::before {
+    left: 100%;
+}
+
+.card-futuristic:hover {
+    transform: translateY(-4px);
+    border-color: rgba(37, 99, 235, 0.35);
+    box-shadow: var(--shadow-lg);
+}
+
+.card-futuristic .card-title {
+    color: var(--text);
+}
+
+.card-futuristic .text-muted {
+    color: var(--text-muted) !important;
+}
+
+/* ============================================================
+   Weather Hero (current-weather focal section)
+   ============================================================ */
+.weather-hero {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    border-radius: var(--radius-lg);
+    color: #fff;
+    padding: 2rem;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 16px 40px rgba(37, 99, 235, 0.28);
+}
+
+.weather-hero::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(circle at 90% 10%, rgba(255, 255, 255, 0.18), transparent 45%),
+        radial-gradient(circle at 10% 100%, rgba(255, 255, 255, 0.12), transparent 40%);
+    pointer-events: none;
+}
+
+.weather-hero-location {
+    font-weight: 600;
+    font-size: 1.05rem;
+    opacity: 0.95;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.weather-hero-temp {
+    font-size: clamp(3rem, 7vw, 4.5rem);
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    text-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+}
+
+.weather-hero-condition {
+    font-size: 1.15rem;
+    font-weight: 500;
+    opacity: 0.95;
+}
+
+.weather-hero-icon {
+    font-size: 3.5rem;
+    filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.15));
+    animation: float 3.5s ease-in-out infinite;
+}
+
+.weather-metric-chip {
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: var(--radius-md);
+    padding: 0.7rem 0.6rem;
+    text-align: center;
+    backdrop-filter: blur(6px);
+    transition: transform 0.25s ease, background 0.25s ease;
+}
+
+.weather-metric-chip:hover {
+    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.24);
+}
+
+.weather-metric-chip i {
+    font-size: 1.05rem;
+    margin-bottom: 0.3rem;
+    opacity: 0.95;
+}
+
+.weather-metric-chip .metric-chip-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    opacity: 0.85;
+    margin-bottom: 0.15rem;
+}
+
+.weather-metric-chip .metric-chip-value {
+    font-weight: 700;
+    font-size: 1.05rem;
+}
+
+/* Light on-card variant, used e.g. inside white cards */
+.weather-metric-chip.light {
+    background: var(--bg-alt);
+    border: 1px solid var(--border-soft);
+}
+
+.weather-metric-chip.light .metric-chip-label {
+    color: var(--text-muted);
+    opacity: 1;
+}
+
+.weather-metric-chip.light .metric-chip-value {
+    color: var(--text);
+}
+
+.weather-metric-chip.light i {
+    color: var(--primary);
+}
+
+/* ============================================================
+   Stats Cards
+   ============================================================ */
+.stat-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-lg);
+    padding: 1.4rem 1.25rem;
+    position: relative;
+    overflow: hidden;
+    text-align: center;
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    animation: fadeInUp 0.5s ease both;
+}
+
+.stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--primary), var(--secondary));
+}
+
+.stat-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-md);
+}
+
+.stat-card i {
+    font-size: 1.9rem;
+    margin-bottom: 0.5rem;
+}
+
+.stat-card h3 {
+    font-size: 1.9rem;
+    font-weight: 800;
+    margin: 0.4rem 0;
+    color: var(--text);
+}
+
+.stat-card p {
+    color: var(--text-muted);
+}
+
+/* ============================================================
+   Buttons
+   ============================================================ */
+.btn {
+    border-radius: var(--radius-sm);
+}
+
+.btn-futuristic {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    border: none;
+    border-radius: var(--radius-sm);
+    color: white;
+    padding: 0.6rem 1.25rem;
+    font-weight: 600;
+    transition: all 0.25s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-futuristic:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 18px rgba(37, 99, 235, 0.32);
+    color: white;
+}
+
+.btn-futuristic:focus-visible,
+.btn:focus-visible,
+.form-control:focus-visible,
+.nav-link:focus-visible {
+    outline: 2px solid var(--secondary);
+    outline-offset: 2px;
+}
+
+/* ============================================================
+   Tables
+   ============================================================ */
+.table-futuristic {
+    background: var(--card-bg);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+}
+
+.table-futuristic th {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+    color: white;
+    border: none;
+    padding: 1rem;
+    font-weight: 600;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.table-futuristic td {
+    background: var(--card-bg);
+    color: var(--text);
+    border-color: var(--border-soft);
+    padding: 0.875rem 1rem;
+    transition: background-color 0.2s ease;
+    vertical-align: middle;
+}
+
+.table-futuristic tr:hover td {
+    background: rgba(37, 99, 235, 0.05);
+}
+
+/* ============================================================
+   Weather Icons
+   ============================================================ */
+.weather-icon {
+    font-size: 1.75rem;
+    background: linear-gradient(135deg, var(--accent), #FB923C);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: float 3s ease-in-out infinite;
+    display: inline-block;
+}
+
+@keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-5px); }
+}
+
+/* ============================================================
+   Alerts / badges
+   ============================================================ */
+.alert-badge {
+    background: linear-gradient(135deg, var(--danger), #dc2626);
+    color: white;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    animation: pulse 2s infinite;
+}
+
+.warning-badge {
+    background: linear-gradient(135deg, var(--warning), #ea580c);
+}
+
+.success-badge {
+    background: linear-gradient(135deg, var(--success), #16a34a);
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+/* Real-time indicators */
+.live-indicator {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background: var(--success);
+    border-radius: 50%;
+    animation: blink 2s infinite;
+    margin-right: 0.5rem;
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2);
+}
+
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0.4; }
+}
+
+/* Loading Animation */
+.loading-dots::after {
+    content: '...';
+    animation: dots 1.5s steps(4, end) infinite;
+}
+
+@keyframes dots {
+    0%, 20% { content: '.'; }
+    40% { content: '..'; }
+    60%, 100% { content: '...'; }
+}
+
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.stat-card:nth-child(1) { animation-delay: 0s; }
+.stat-card:nth-child(2) { animation-delay: 0.06s; }
+.stat-card:nth-child(3) { animation-delay: 0.12s; }
+.stat-card:nth-child(4) { animation-delay: 0.18s; }
+
+/* Progress Bars */
+.progress-futuristic {
+    background: var(--bg-alt);
+    border-radius: 8px;
+    overflow: hidden;
+    height: 6px;
+}
+
+.progress-futuristic .progress-bar {
+    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    border-radius: 8px;
+    transition: width 0.8s ease-in-out;
+}
+
+/* AI Status Indicator */
+.ai-status {
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.ai-status.trained {
+    background: rgba(34, 197, 94, 0.12);
+    color: #16a34a;
+    border: 1px solid rgba(34, 197, 94, 0.4);
+}
+
+.ai-status.training {
+    background: rgba(245, 158, 11, 0.12);
+    color: #b45309;
+    border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+/* Utility Classes */
+.text-glow {
+    color: var(--primary);
+    text-shadow: none;
+}
+
+.glass-effect {
+    background: rgba(37, 99, 235, 0.05);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--border-soft);
+    color: var(--text);
+}
+
+/* ============================================================
+   Responsive Design
+   ============================================================ */
+@media (max-width: 768px) {
+    .card-futuristic:hover {
+        transform: none;
+    }
+
+    .stat-card {
+        padding: 1rem;
+    }
+
+    .stat-card h3 {
+        font-size: 1.5rem;
+    }
+
+    .weather-hero {
+        padding: 1.5rem;
+        text-align: center;
+    }
+
+    .weather-hero-temp {
+        font-size: 3.25rem;
+    }
+
+    .navbar-brand {
+        font-size: 1.1rem;
+    }
+
+    .table-responsive {
+        border-radius: var(--radius-md);
+    }
+}
+
+@media (max-width: 576px) {
+    .weather-hero-icon {
+        font-size: 2.75rem;
+    }
+}
+
+/* Temperature colors — tuned for contrast on light cards */
+.temp-cold { color: #0284C7; }
+.temp-mild { color: #16A34A; }
+.temp-warm { color: #D97706; }
+.temp-hot { color: #DC2626; }
+
+/* Weather condition colors */
+.weather-sunny { color: #D97706; }
+.weather-cloudy { color: #64748B; }
+.weather-rainy { color: #0284C7; }
+.weather-stormy { color: #7C3AED; }
+.weather-cold { color: #0EA5E9; }
+
+/* ============================================================
+   AGRICULTURE MODULE STYLES
+   ============================================================ */
+
+.health-excellent { color: #16A34A; }
+.health-good      { color: #22C55E; }
+.health-fair      { color: #D97706; }
+.health-poor      { color: #DC2626; }
+
+.crop-wheat    { background: #D97706; }
+.crop-rice     { background: #0EA5E9; }
+.crop-cotton   { background: #7C3AED; }
+.crop-maize    { background: #16A34A; }
+.crop-sugarcane{ background: #65A30D; }
+
+.risk-high   { color: #DC2626; font-weight:700; }
+.risk-medium { color: #D97706; font-weight:700; }
+.risk-low    { color: #16A34A; }
+
+/* Farm / field cards */
+.agri-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    color: var(--text);
+}
+
+.agri-card:hover {
+    border-color: var(--success);
+    box-shadow: 0 10px 24px rgba(34, 197, 94, 0.18);
+    transform: translateY(-3px);
+}
+
+/* Health progress bar override for green */
+.progress-bar-health-good { background: linear-gradient(90deg, #22C55E, #4ADE80); }
+.progress-bar-health-fair { background: linear-gradient(90deg, #F59E0B, #FBBF24); }
+.progress-bar-health-poor { background: linear-gradient(90deg, #EF4444, #F87171); }
+
+/* Irrigation badge */
+.irrigation-badge {
+    background: linear-gradient(135deg, var(--secondary), #0891B2);
+    color: white;
+    padding: 0.2rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+/* Pest risk pill */
+.pest-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0.2rem 0.65rem;
+    border-radius: 12px;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+.pest-pill-high   { background: rgba(239,68,68,0.12); color: #DC2626; border:1px solid rgba(239,68,68,0.4); }
+.pest-pill-medium { background: rgba(245,158,11,0.12); color: #B45309; border:1px solid rgba(245,158,11,0.4); }
+.pest-pill-low    { background: rgba(34,197,94,0.12); color: #16A34A; border:1px solid rgba(34,197,94,0.4); }
+
+/* Yield gap indicator */
+.yield-gap-ok   { color: #16A34A; }
+.yield-gap-warn { color: #D97706; }
+.yield-gap-bad  { color: #DC2626; }
+
+/* Responsive breadcrumb */
+.breadcrumb { background: transparent; padding: 0; }
+.breadcrumb-item + .breadcrumb-item::before { color: var(--text-muted); }
+
+/* Glass form controls */
+.form-control.glass-effect,
+.form-select.glass-effect {
+    background: var(--card-bg) !important;
+    border: 1px solid var(--border-soft) !important;
+    color: var(--text) !important;
+    border-radius: var(--radius-sm);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.form-control.glass-effect:focus,
+.form-select.glass-effect:focus {
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.14) !important;
+    background: var(--card-bg) !important;
+}
+.form-select.glass-effect option { background: var(--card-bg); color: var(--text); }
+
+/* Legacy dark-theme form controls (older pages) re-themed to match
+   the light dashboard look, without touching their markup/classes. */
+.form-control.bg-dark,
+.form-select.bg-dark {
+    background-color: var(--bg-alt) !important;
+    color: var(--text) !important;
+    border: 1px solid var(--border-soft) !important;
+}
+.form-control.bg-dark::placeholder {
+    color: var(--text-muted);
+}
+.form-control.bg-dark:focus,
+.form-select.bg-dark:focus {
+    background-color: var(--card-bg) !important;
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14) !important;
+    color: var(--text) !important;
+}
+.form-select.bg-dark option {
+    background: var(--card-bg);
+    color: var(--text);
+}
+.list-group-item.bg-transparent.text-light {
+    color: var(--text) !important;
+    border-color: var(--border-soft) !important;
+}
+
+/* Search / location input used on the weather display page */
+.search-input-group {
+    background: var(--card-bg);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+.search-input-group .form-control {
+    background: var(--card-bg);
+    color: var(--text);
+    padding: 0.65rem 0.75rem;
+    box-shadow: none !important;
+}
+.search-input-group .form-control::placeholder {
+    color: var(--text-muted);
+}
+.search-input-group .btn-futuristic {
+    border-radius: 0;
+}
+
+/* Forecast strip — horizontal on desktop, scrollable on mobile */
+.forecast-strip {
+    display: flex;
+    gap: 0.9rem;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+    scroll-snap-type: x proximity;
+}
+
+.forecast-strip::-webkit-scrollbar {
+    height: 6px;
+}
+
+.forecast-chip {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+    background: var(--card-bg);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-md);
+    padding: 1rem 1.1rem;
+    text-align: center;
+    min-width: 110px;
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.forecast-chip:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-md);
+}
+
+/* Section fade-in on load */
+.fade-in-section {
+    animation: fadeInUp 0.5s ease both;
+}
+
+/* ============================================================
+   Scrollbar
+   ============================================================ */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(37, 99, 235, 0.25);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(37, 99, 235, 0.4);
+}

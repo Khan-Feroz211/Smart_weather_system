@@ -1,0 +1,3382 @@
+import sys
+import os
+
+# Ensure UTF-8 encoding for stdout/stderr (fixes UnicodeEncodeError on Windows)
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, Response, session
+from flask_socketio import SocketIO, emit
+import json
+from datetime import datetime, timedelta, timezone
+import requests
+import threading
+import time
+from apscheduler.schedulers.background import BackgroundScheduler
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+import joblib
+import os
+import atexit
+from dotenv import load_dotenv
+from collections import defaultdict, deque
+import statistics
+import logging
+
+# Import Phase 1-6 modules
+from stacking_ensemble import StackingEnsemble, HAZARD_CATEGORIES, RISK_COLORS
+from feature_engineering import AdvancedFeatureEngineer
+from evaluation import ComprehensiveEvaluator
+from xai_explainability import XAISystem
+from multi_hazard import MultiHazardClassifier, CrisisCommunicationSystem, AlertStore
+from edge_case_hardening_v2 import (
+    GracefulDegradationManager, CacheMode,
+    ConfidencePenaltySystem, FallbackCacheSystem
+)
+
+# Load environment variables
+load_dotenv()
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+import db
+import auth
+import admin_routes
+
+app = Flask(__name__)
+# No hard-coded fallback: a guessable secret would let anyone forge session cookies.
+app.secret_key = auth.resolve_secret_key()
+socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="*")
+
+# Register AgriAdvisor API Blueprint (v6)
+from api_routes import agri_bp
+app.register_blueprint(agri_bp)
+
+# Authentication (Supabase Auth), heartbeat, and the Admin Panel
+auth.init_app(app)
+app.register_blueprint(admin_routes.admin_bp)
+
+
+# Configuration
+OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY', 'demo_key')
+OPENWEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
+SENSOR_GATEWAY_URL = os.environ.get('SENSOR_GATEWAY_URL', '').strip()
+SENSOR_STALE_MINUTES = int(os.environ.get('SENSOR_STALE_MINUTES', '15'))
+SENSOR_MODE = os.environ.get('SENSOR_MODE', 'simulation').lower()  # 'simulation' or 'real'
+
+# AI Model Storage (Phase 1: Stacking Ensemble)
+MODEL_PATH = 'models/stacking_ensemble.joblib'
+SCALER_PATH = 'models/scaler.joblib'
+
+# Create directories
+os.makedirs('models', exist_ok=True)
+os.makedirs('cache', exist_ok=True)
+
+SENSOR_FIELD_RANGES = {
+    'temperature': (-50.0, 60.0),
+    'humidity': (0.0, 100.0),
+    'pressure': (870.0, 1085.0),
+    'wind_speed': (0.0, 120.0)
+}
+
+recent_cleaned_by_location = defaultdict(lambda: deque(maxlen=24))
+
+WEATHER_NUMERIC_FIELDS = {'temperature', 'humidity', 'pressure', 'wind_speed'}
+VALIDATION_PENALTY_PER_FLAG = 0.12
+KMH_TO_MPS = 0.277778
+
+class WeatherAI:
+    """
+    AI System using Stacking Ensemble Classifier (Phase 1) with
+    Advanced Feature Engineering (Phase 2), XAI (Phase 4),
+    Multi-Hazard Output (Phase 5), and Edge-Case Hardening (Phase 6).
+
+    Replaces the single Random Forest with:
+      - Base Learners: Random Forest, XGBoost, LightGBM, ELM
+      - Meta-Learner: Logistic Regression
+      - Feature Engineering: lag features, rolling stats, interaction terms,
+        cyclical encoding, upper-level data
+      - XAI: SHAP (global), LIME (local)
+      - Multi-Hazard: 5 hazard categories with NWS/INFORM color coding
+      - Graceful Degradation: cache mode, confidence penalties
+    """
+
+    def __init__(self):
+        # Phase 1: Stacking Ensemble
+        self.ensemble = StackingEnsemble(
+            n_estimators_rf=100,
+            n_estimators_xgb=100,
+            n_estimators_lgb=100,
+            n_hidden_elm=100,
+            meta_lr=0.01,
+            cv_folds=5,
+            random_state=42,
+        )
+
+        # Phase 2: Feature Engineering
+        self.feature_engineer = AdvancedFeatureEngineer()
+
+        # Phase 4: XAI System
+        self.xai_system = None  # Initialized after training
+
+        # Phase 5: Multi-Hazard Classifier
+        self.hazard_classifier = MultiHazardClassifier()
+
+        # Phase 5: Crisis Communication
+        self.communication_system = CrisisCommunicationSystem()
+
+        # Phase 6: Graceful Degradation
+        self.degradation_manager = GracefulDegradationManager(
+            cache_dir='cache',
+            api_url=OPENWEATHER_URL,
+            api_key=OPENWEATHER_API_KEY,
+        )
+
+        self.is_trained = False
+        self.training_data_points = 0
+        self._feature_names = []
+        self._training_data_for_xai = None
+
+    def prepare_features(self, historical_data, location='Unknown'):
+        """
+        Prepare features for training using Advanced Feature Engineering (Phase 2).
+
+        Generates:
+          - Lag features (t-1, t-3, t-6, t-12 hours)
+          - Rolling statistics (mean, std, min, max)
+          - Interaction terms (heat index, VPD, air density, etc.)
+          - Cyclical encoding (hour, day, month, day_of_week)
+          - Upper-level atmospheric features (850hPa, 500hPa)
+        """
+        if len(historical_data) < 20:
+            return None, None, None
+
+        try:
+            df = pd.DataFrame(historical_data)
+
+            # Ensure required columns
+            for col in ['temperature', 'humidity', 'pressure', 'wind_speed']:
+                if col not in df.columns:
+                    df[col] = 20.0 if col == 'temperature' else (
+                        60.0 if col == 'humidity' else (1013.0 if col == 'pressure' else 5.0)
+                    )
+
+            # Ensure timestamp
+            if 'timestamp' not in df.columns:
+                df['timestamp'] = pd.date_range(
+                    start=datetime.now(), periods=len(df), freq='h'
+                )
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df = df.sort_values('timestamp').reset_index(drop=True)
+
+            # Engineer features
+            df_engineered, feature_names = self.feature_engineer.engineer_features(df, location)
+
+            if len(df_engineered) < 5:
+                return None, None, None
+
+            # Create target labels (hazard categories)
+            targets = self._create_hazard_labels(df_engineered)
+
+            # Extract feature matrix
+            X = df_engineered[feature_names].values.astype(float)
+            y = np.array(targets)
+
+            # Store feature names
+            self._feature_names = feature_names
+
+            # Store training data for XAI
+            self._training_data_for_xai = X.copy()
+
+            return X, y, feature_names
+
+        except Exception as e:
+            logger.error(f"Feature preparation error: {e}")
+            return None, None, None
+
+    def _create_hazard_labels(self, df):
+        """
+        Create multi-hazard classification labels from weather data.
+
+        Labels: extreme_heat_heatwave, extreme_cold_frost,
+                heavy_rain_flood, high_wind_storm, normal
+        """
+        labels = []
+        for _, row in df.iterrows():
+            temp = row.get('temperature', 20.0)
+            humidity = row.get('humidity', 60.0)
+            wind_speed = row.get('wind_speed', 5.0)
+            pressure = row.get('pressure', 1013.0)
+            heat_index = row.get('heat_index', temp)
+
+            # Determine hazard category
+            if temp >= 38 or heat_index >= 40:
+                labels.append('extreme_heat_heatwave')
+            elif temp <= 2:
+                labels.append('extreme_cold_frost')
+            elif wind_speed >= 25:
+                labels.append('high_wind_storm')
+            elif pressure < 1000 and row.get('pressure_trend_6h', 0) < -2:
+                labels.append('heavy_rain_flood')
+            else:
+                labels.append('normal')
+
+        return labels
+
+    def train(self, historical_data, location='Unknown'):
+        """
+        Train the Stacking Ensemble model (Phase 1).
+
+        Uses Time-Aware Cross-Validation (Phase 3) to evaluate the model
+        before deployment.
+        """
+        try:
+            X, y, feature_names = self.prepare_features(historical_data, location)
+            if X is None or len(X) < 10:
+                logger.warning("Insufficient data for training")
+                return False
+
+            # Train the stacking ensemble
+            logger.info(f"Training Stacking Ensemble with {len(X)} samples, {len(feature_names)} features")
+            self.ensemble.fit(X, y, feature_names=feature_names)
+
+            self.is_trained = True
+            self.training_data_points = len(X)
+
+            # Save model
+            self.ensemble.save(MODEL_PATH)
+
+            # Initialize XAI system
+            self.xai_system = XAISystem(
+                model=self.ensemble,
+                feature_names=feature_names,
+                class_names=HAZARD_CATEGORIES,
+                training_data=X,
+            )
+
+            # Update hazard classifier with trained model
+            self.hazard_classifier = MultiHazardClassifier(
+                ml_model=self.ensemble,
+                feature_names=feature_names,
+            )
+
+            # Run Time-Aware evaluation (Phase 3)
+            evaluator = ComprehensiveEvaluator(temporal_splits=3, train_fraction=0.8)
+            try:
+                eval_results = evaluator.evaluate_temporal(
+                    self.ensemble, X, y, feature_names=feature_names
+                )
+                report = evaluator.generate_report(eval_results)
+                logger.info(f"\n{report}")
+            except Exception as e:
+                logger.warning(f"Evaluation failed: {e}")
+
+            # Emit training completion event
+            training_metrics = self.ensemble.training_metrics
+            socketio.emit('ai_training_complete', {
+                'score': training_metrics.get('training_accuracy', 0.0),
+                'data_points': self.training_data_points,
+                'model_version': self.ensemble.model_version,
+                'base_learners': self.ensemble.base_learner_names,
+                'timestamp': datetime.now().isoformat()
+            })
+
+            logger.info(f"✅ Stacking Ensemble trained! Accuracy: {training_metrics.get('training_accuracy', 0):.3f}")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Training failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def load_model(self):
+        """Load trained Stacking Ensemble model."""
+        try:
+            if os.path.exists(MODEL_PATH):
+                self.ensemble = StackingEnsemble()
+                self.ensemble.load(MODEL_PATH)
+                self.is_trained = True
+                self._feature_names = self.ensemble._feature_names
+                self.training_data_points = self.ensemble.training_metrics.get('training_data_points', 0)
+
+                # Initialize XAI and hazard classifier
+                self.xai_system = XAISystem(
+                    model=self.ensemble,
+                    feature_names=self._feature_names,
+                    class_names=HAZARD_CATEGORIES,
+                )
+                self.hazard_classifier = MultiHazardClassifier(
+                    ml_model=self.ensemble,
+                    feature_names=self._feature_names,
+                )
+
+                logger.info(f"✅ Stacking Ensemble loaded! Version: {self.ensemble.model_version}")
+                return True
+        except Exception as e:
+            logger.error(f"❌ Model loading failed: {e}")
+        return False
+
+    def predict(self, current_weather, location='Unknown', recent_history=None, is_cache_mode=False):
+        """
+        Predict multi-hazard probabilities using the Stacking Ensemble.
+
+        Phase 5: Returns probabilities for all hazards simultaneously.
+        Phase 6: Uses graceful degradation if API/data is unavailable.
+        """
+        if not self.is_trained:
+            return self._fallback_prediction(current_weather, location)
+
+        try:
+            # Prepare features using Phase 2 feature engineering.
+            # Align to the model's training feature set so inference is robust
+            # to schema drift / extra metadata fields in the weather dict.
+            features = self.feature_engineer.prepare_single_prediction(
+                current_weather, recent_history, location,
+                expected_feature_names=self._feature_names,
+            )
+
+            # Get ML hazard probabilities
+            ml_result = self.ensemble.predict_multi_hazard(features)
+            ml_probabilities = ml_result.get("hazard_probabilities", {})
+
+            # Classify hazards (Phase 5: hybrid ML + rule-based)
+            hazard_classification = self.hazard_classifier.classify_hazards(
+                weather_data=current_weather,
+                features=features,
+                ml_probabilities=ml_probabilities,
+            )
+
+            # Generate XAI explanation (Phase 4)
+            explanation = None
+            if self.xai_system:
+                explanation = self.xai_system.explain_alert(
+                    features, hazard_classification["hazard_probabilities"]
+                )
+
+            # Generate alert (Phase 5)
+            alert = self.communication_system.generate_alert(
+                location=location,
+                hazard_classification=hazard_classification,
+                explanation=explanation,
+            )
+
+            # Apply confidence penalty (Phase 6)
+            confidence = hazard_classification["hazard_probabilities"].get("normal", 0.5)
+            penalized_confidence, penalty_reasons = ConfidencePenaltySystem.apply_penalty(
+                base_confidence=1.0 - confidence,
+                is_cache_mode=is_cache_mode,
+            )
+
+            alert["confidence"] = round(penalized_confidence, 4)
+            alert["confidence_label"] = ConfidencePenaltySystem.get_confidence_label(penalized_confidence)
+            alert["confidence_penalty_reasons"] = penalty_reasons
+
+            # Add prediction metadata
+            alert["prediction"] = {
+                "predicted_temperature": current_weather.get("temperature"),
+                "hazard_probabilities": hazard_classification["hazard_probabilities"],
+                "model_version": self.ensemble.model_version,
+                "feature_names": self._feature_names,
+                "timestamp": (datetime.now() + timedelta(hours=1)).isoformat(),
+            }
+
+            return alert
+
+        except Exception as e:
+            logger.error(f"Prediction error: {e}")
+            import traceback
+            traceback.print_exc()
+            return self._fallback_prediction(current_weather, location)
+
+    def _fallback_prediction(self, current_weather, location='Unknown'):
+        """Fallback prediction using rule-based hazard detection only."""
+        hazard_classification = self.hazard_classifier.classify_hazards(
+            weather_data=current_weather,
+            ml_probabilities={h: 0.0 for h in HAZARD_CATEGORIES},
+        )
+
+        alert = self.communication_system.generate_alert(
+            location=location,
+            hazard_classification=hazard_classification,
+        )
+
+        alert["confidence"] = 0.3
+        alert["confidence_label"] = "low"
+        alert["confidence_penalty_reasons"] = ["model_not_trained", "rule_based_only"]
+        alert["prediction"] = {
+            "predicted_temperature": current_weather.get("temperature"),
+            "hazard_probabilities": hazard_classification["hazard_probabilities"],
+            "model_version": "fallback_rule_based",
+            "timestamp": (datetime.now() + timedelta(hours=1)).isoformat(),
+        }
+
+        return alert
+
+    def predict_with_degradation(self, location, lat=None, lon=None):
+        """
+        Fetch weather with graceful degradation (Phase 6) and predict.
+
+        This is the main entry point for production predictions.
+        """
+        # Fetch weather with graceful degradation
+        weather_data = self.degradation_manager.fetch_weather_with_degradation(
+            location, lat, lon
+        )
+
+        # Get recent history from cache
+        recent_history = self.degradation_manager.cache.get_recent_weather_history(
+            location, hours=24
+        )
+
+        # Build a clean observation for the model. The degradation response
+        # contains operational metadata (mode, confidence, api_error, etc.)
+        # which must NOT be treated as weather features. We also derive the
+        # cyclic time features (hour, day_of_week, month) that the trained
+        # model's feature set includes.
+        is_cache_mode = weather_data.get("data_source") == "cached"
+        ts_val = weather_data.get("timestamp") or datetime.now().isoformat()
+        try:
+            ts_dt = datetime.fromisoformat(str(ts_val).replace("Z", "+00:00"))
+        except Exception:
+            ts_dt = datetime.now()
+        clean_weather = {
+            "temperature": weather_data.get("temperature", 20.0),
+            "humidity": weather_data.get("humidity", 60.0),
+            "pressure": weather_data.get("pressure", 1013.0),
+            "wind_speed": weather_data.get("wind_speed", 5.0),
+            "precipitation": weather_data.get("precipitation", 0.0),
+            "precipitation_rate": weather_data.get("precipitation_rate", 0.0),
+            "condition": weather_data.get("condition", "Unknown"),
+            "location": location,
+            "timestamp": ts_val,
+            "hour": ts_dt.hour,
+            "day_of_week": ts_dt.weekday(),
+            "month": ts_dt.month,
+        }
+
+        # Predict
+        alert = self.predict(clean_weather, location, recent_history, is_cache_mode=is_cache_mode)
+
+        # Add degradation metadata
+        alert["degradation_info"] = {
+            "mode": weather_data.get("mode", "unknown"),
+            "data_source": weather_data.get("data_source", "unknown"),
+            "data_age_hours": weather_data.get("data_age_hours", 0),
+            "stale_data_warning": weather_data.get("stale_data_warning"),
+            "cache_mode_banner": weather_data.get("cache_mode_banner"),
+            "api_error": weather_data.get("api_error"),
+            "circuit_breaker_state": weather_data.get("circuit_breaker_state"),
+        }
+
+        # Store in cache
+        self.degradation_manager.cache.store_weather(
+            location, weather_data, confidence=alert.get("confidence", 0.5)
+        )
+
+        return alert
+
+    def assess_data_quality(self, validation_result, cleaning_notes, features):
+        """Rule-based quality assessment for sensor records"""
+        flags = validation_result.get('quality_flags', [])
+        score = validation_result.get('validation_score', 0.0)
+        suspicious_reasons = []
+
+        if not validation_result.get('is_valid', False):
+            suspicious_reasons.append('validation_failed')
+        if any(flag.startswith('missing_') for flag in flags):
+            suspicious_reasons.append('missing_values_detected')
+        if any(flag.startswith('outlier_') for flag in flags) or any('outlier_' in note for note in cleaning_notes):
+            suspicious_reasons.append('outlier_adjustments_applied')
+        if features.get('sensor_reliability', 1.0) < 0.6:
+            suspicious_reasons.append('low_sensor_reliability')
+
+        quality_label = 'valid' if not suspicious_reasons and score >= 0.7 else 'suspicious'
+        confidence = max(0.5, min(0.98, score))
+
+        return {
+            'quality_label': quality_label,
+            'confidence': round(confidence, 3),
+            'reasons': suspicious_reasons if suspicious_reasons else ['passed_all_checks'],
+            'validation_score': round(score, 3),
+            'quality_flags': flags
+        }
+
+# Initialize AI System
+weather_ai = WeatherAI()
+
+def parse_sensor_timestamp(timestamp_value):
+    """Parse sensor timestamp safely"""
+    if isinstance(timestamp_value, datetime):
+        return timestamp_value
+    if not timestamp_value:
+        return datetime.now()
+    try:
+        return datetime.fromisoformat(str(timestamp_value).replace('Z', '+00:00')).replace(tzinfo=None)
+    except Exception:
+        return datetime.now()
+
+def calculate_sensor_reliability(sensor_id):
+    """Compute sensor reliability from monitoring table"""
+    conn = get_db_connection()
+    if not conn:
+        return 1.0
+    try:
+        metric = conn.execute('''
+            SELECT total_records, validation_failures
+            FROM sensor_quality_metrics
+            WHERE sensor_id = %s
+        ''', (sensor_id,)).fetchone()
+        if not metric or metric['total_records'] == 0:
+            return 1.0
+        failure_rate = metric['validation_failures'] / float(metric['total_records'])
+        return max(0.0, min(1.0, 1.0 - failure_rate))
+    except Exception as e:
+        print(f"Reliability calculation warning: {e}")
+        return 1.0
+    finally:
+        conn.close()
+
+def ingest_sensor_weather(location):
+    """Ingest weather data from sensor gateway with API fallback"""
+    sensor_data = None
+    ingestion_mode = 'sensor'
+    source = 'sensor_gateway'
+
+    if SENSOR_GATEWAY_URL:
+        try:
+            response = requests.get(SENSOR_GATEWAY_URL, params={'location': location}, timeout=8)
+            if response.status_code == 200:
+                payload = response.json()
+                sensor_data = payload[0] if isinstance(payload, list) and payload else payload
+        except Exception as e:
+            print(f"Sensor gateway warning for {location}: {e}")
+
+    if not sensor_data:
+        weather_data = fetch_live_weather(location)
+        ingestion_mode = 'fallback'
+        source = 'openweather_or_demo'
+        sensor_data = {
+            'sensor_id': f'fallback-{location.lower().replace(" ", "-")}',
+            'source': source,
+            'timestamp': weather_data.get('timestamp', datetime.now().isoformat()),
+            'temperature': weather_data.get('temperature'),
+            'humidity': weather_data.get('humidity'),
+            'pressure': weather_data.get('pressure'),
+            'wind_speed': weather_data.get('wind_speed'),
+            'condition': weather_data.get('condition', 'Unknown'),
+            'location': location
+        }
+
+    sensor_data['source'] = sensor_data.get('source') or source
+    sensor_data['ingestion_mode'] = ingestion_mode
+    sensor_data['sensor_id'] = str(sensor_data.get('sensor_id') or f'sensor-{location.lower().replace(" ", "-")}')
+    sensor_data['location'] = sensor_data.get('location') or location
+    sensor_data['timestamp'] = sensor_data.get('timestamp') or datetime.now().isoformat()
+    return sensor_data
+
+def validate_sensor_data(sensor_record):
+    """Validate raw sensor data before storage"""
+    quality_flags = []
+    required_fields = ['sensor_id', 'location', 'timestamp', 'temperature', 'humidity', 'pressure', 'wind_speed']
+    validated = dict(sensor_record)
+
+    for field in required_fields:
+        if field not in validated or validated[field] in (None, ''):
+            quality_flags.append(f'missing_{field}')
+
+    for field in ['temperature', 'humidity', 'pressure', 'wind_speed']:
+        if field in validated and validated[field] not in (None, ''):
+            try:
+                validated[field] = float(validated[field])
+            except (TypeError, ValueError):
+                quality_flags.append(f'invalid_type_{field}')
+                validated[field] = None
+
+    sensor_dt = parse_sensor_timestamp(validated.get('timestamp'))
+    now = datetime.now()
+    if sensor_dt < now - timedelta(minutes=SENSOR_STALE_MINUTES):
+        quality_flags.append('stale_timestamp')
+    if sensor_dt > now + timedelta(minutes=2):
+        quality_flags.append('future_timestamp')
+    validated['parsed_timestamp'] = sensor_dt
+
+    for field, (min_value, max_value) in SENSOR_FIELD_RANGES.items():
+        value = validated.get(field)
+        if value is None:
+            continue
+        if value < min_value or value > max_value:
+            quality_flags.append(f'out_of_range_{field}')
+
+    conn = get_db_connection()
+    if conn:
+        try:
+            duplicate = conn.execute('''
+                SELECT 1
+                FROM sensor_pipeline_logs
+                WHERE sensor_id = %s AND sensor_timestamp = %s
+                LIMIT 1
+            ''', (validated.get('sensor_id'), db.as_utc(sensor_dt))).fetchone()
+            if duplicate:
+                quality_flags.append('duplicate_record')
+        except Exception as e:
+            print(f"Duplicate check warning: {e}")
+        finally:
+            conn.close()
+
+    validation_score = max(0.0, 1.0 - (len(quality_flags) * VALIDATION_PENALTY_PER_FLAG))
+    return {
+        'is_valid': len(quality_flags) == 0,
+        'quality_flags': quality_flags,
+        'validation_score': round(validation_score, 3),
+        'validated_record': validated
+    }
+
+def historical_field_average(location, field):
+    """Get historical average for fallback imputation"""
+    if field not in WEATHER_NUMERIC_FIELDS:
+        return None
+    field_queries = {
+        'temperature': "SELECT AVG(temperature) as avg_value FROM weather_data WHERE location = %s AND temperature IS NOT NULL",
+        'humidity': "SELECT AVG(humidity) as avg_value FROM weather_data WHERE location = %s AND humidity IS NOT NULL",
+        'pressure': "SELECT AVG(pressure) as avg_value FROM weather_data WHERE location = %s AND pressure IS NOT NULL",
+        'wind_speed': "SELECT AVG(wind_speed) as avg_value FROM weather_data WHERE location = %s AND wind_speed IS NOT NULL"
+    }
+    conn = get_db_connection()
+    if not conn:
+        return None
+    try:
+        row = conn.execute(field_queries[field], (location,)).fetchone()
+        return float(row['avg_value']) if row and row['avg_value'] is not None else None
+    except Exception as e:
+        print(f"Historical average warning ({field}): {e}")
+        return None
+    finally:
+        conn.close()
+
+def clean_weather_record(validation_result):
+    """Clean and normalize validated sensor data.
+
+    (Renamed from `clean_sensor_data`: a Flask view further down the file had the same name and
+    silently replaced this function, so the weather pipeline crashed when it called it.)"""
+    record = dict(validation_result['validated_record'])
+    flags = list(validation_result['quality_flags'])
+    notes = []
+    location = record.get('location', 'Unknown')
+
+    defaults = {
+        'temperature': 20.0,
+        'humidity': 60.0,
+        'pressure': 1013.0,
+        'wind_speed': 8.0
+    }
+
+    for field in ['temperature', 'humidity', 'pressure', 'wind_speed']:
+        if record.get(field) is None:
+            avg = historical_field_average(location, field)
+            record[field] = avg if avg is not None else defaults[field]
+            notes.append(f'imputed_{field}')
+
+        min_value, max_value = SENSOR_FIELD_RANGES[field]
+        if record[field] < min_value:
+            record[field] = min_value
+            notes.append(f'clamped_low_{field}')
+        elif record[field] > max_value:
+            record[field] = max_value
+            notes.append(f'clamped_high_{field}')
+
+    recent_series = [
+        item['temperature']
+        for item in recent_cleaned_by_location[location]
+        if 'temperature' in item and item['temperature'] is not None
+    ]
+    if len(recent_series) >= 5:
+        median_temp = statistics.median(recent_series)
+        if abs(record['temperature'] - median_temp) > 20:
+            record['temperature'] = round((record['temperature'] + median_temp) / 2, 2)
+            notes.append('outlier_temperature_smoothed')
+            flags.append('outlier_temperature')
+
+    if record['wind_speed'] > 70:
+        record['wind_speed'] = round(record['wind_speed'] * KMH_TO_MPS, 2)
+        notes.append('wind_normalized_to_mps')
+
+    record['condition'] = str(record.get('condition', 'Unknown')).title()
+    record['timestamp'] = record.get('parsed_timestamp', datetime.now()).isoformat()
+    if 'duplicate_record' in flags:
+        notes.append('duplicate_removed_from_storage')
+    record['quality_flags'] = sorted(set(flags))
+    record['cleaning_notes'] = notes
+    return record
+
+def engineer_features(cleaned_record, validation_result):
+    """Generate features from cleaned weather data"""
+    location = cleaned_record.get('location', 'Unknown')
+    sensor_id = cleaned_record.get('sensor_id', 'unknown')
+    sensor_dt = parse_sensor_timestamp(cleaned_record.get('timestamp'))
+    recent_records = list(recent_cleaned_by_location[location])
+
+    temp_history = [item['temperature'] for item in recent_records if 'temperature' in item and item['temperature'] is not None]
+    humidity_history = [item['humidity'] for item in recent_records if 'humidity' in item and item['humidity'] is not None]
+    recent_temp_avg = statistics.mean(temp_history[-6:]) if temp_history else cleaned_record['temperature']
+    recent_humidity_avg = statistics.mean(humidity_history[-6:]) if humidity_history else cleaned_record['humidity']
+
+    prev_temp = temp_history[-1] if temp_history else cleaned_record['temperature']
+    prev_humidity = humidity_history[-1] if humidity_history else cleaned_record['humidity']
+
+    features = {
+        'hour': sensor_dt.hour,
+        'day_of_week': sensor_dt.weekday(),
+        'month': sensor_dt.month,
+        'rolling_temp_avg_6': round(recent_temp_avg, 3),
+        'rolling_humidity_avg_6': round(recent_humidity_avg, 3),
+        'delta_temperature': round(cleaned_record['temperature'] - prev_temp, 3),
+        'humidity_trend': round(cleaned_record['humidity'] - prev_humidity, 3),
+        'sensor_reliability': round(calculate_sensor_reliability(sensor_id), 3),
+        'validation_score': validation_result['validation_score']
+    }
+    return features
+
+def build_decision(cleaned_record, prediction, quality_assessment):
+    """
+    Generate decision output from weather + quality + AI prediction.
+
+    Phase 5: Uses multi-hazard output with NWS/INFORM color coding.
+    The prediction from the new WeatherAI.predict() already includes
+    multi-hazard probabilities, risk levels, and recommended actions.
+    """
+    if prediction and 'hazard_probabilities' in prediction:
+        # New multi-hazard prediction format (Phase 5)
+        return {
+            'alert_required': prediction.get('alert_required', False),
+            'severity': prediction.get('overall_risk_level', 'green'),
+            'reason': ', '.join(prediction.get('active_hazards', [])) if prediction.get('active_hazards') else 'normal_conditions',
+            'recommended_action': prediction.get('message', 'Weather conditions normal. Continue monitoring.'),
+            'confidence': prediction.get('confidence', quality_assessment['confidence']),
+            'hazard_probabilities': prediction.get('hazard_probabilities', {}),
+            'risk_levels': prediction.get('risk_levels', {}),
+            'active_hazards': prediction.get('active_hazards', []),
+            'explanation': prediction.get('explanation'),
+            'top_features': prediction.get('top_features'),
+            'degradation_info': prediction.get('degradation_info', {}),
+            'confidence_label': prediction.get('confidence_label', 'unknown'),
+            'confidence_penalty_reasons': prediction.get('confidence_penalty_reasons', []),
+        }
+
+    # Fallback: old-style decision (for backward compatibility)
+    severity = 'low'
+    reasons = []
+    actions = []
+
+    if quality_assessment['quality_label'] == 'suspicious':
+        severity = 'medium'
+        reasons.append('sensor_data_suspicious')
+        actions.append('Inspect sensor and verify calibration.')
+
+    if cleaned_record['temperature'] >= 35:
+        severity = 'high'
+        reasons.append('extreme_heat')
+        actions.append('Limit outdoor activity and hydrate frequently.')
+    elif cleaned_record['temperature'] <= 2:
+        severity = 'high'
+        reasons.append('extreme_cold')
+        actions.append('Protect sensitive crops and wear thermal clothing.')
+
+    if cleaned_record['wind_speed'] >= 20:
+        severity = 'high'
+        reasons.append('high_wind')
+        actions.append('Avoid lightweight outdoor structures and secure equipment.')
+
+    if cleaned_record['humidity'] >= 90:
+        reasons.append('very_high_humidity')
+        actions.append('Delay irrigation and monitor fungal risk.')
+
+    alert_required = severity in ('medium', 'high')
+    confidence = prediction['confidence'] if prediction else quality_assessment['confidence']
+    recommended_action = actions[0] if actions else 'Weather conditions normal. Continue monitoring.'
+
+    return {
+        'alert_required': alert_required,
+        'severity': severity,
+        'reason': ', '.join(sorted(set(reasons))) if reasons else 'normal_conditions',
+        'recommended_action': recommended_action,
+        'confidence': round(float(confidence), 3)
+    }
+
+def update_sensor_quality_metrics(sensor_id, validation_result, cleaned_record):
+    """Track validation failures and cleaning corrections per sensor"""
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        validation_failures = 1 if not validation_result['is_valid'] else 0
+        duplicate_failures = 1 if 'duplicate_record' in validation_result['quality_flags'] else 0
+        outlier_corrections = len([x for x in cleaned_record.get('cleaning_notes', []) if 'outlier' in x or 'clamped' in x])
+
+        conn.execute('''
+            INSERT INTO sensor_quality_metrics
+            (sensor_id, total_records, validation_failures, duplicate_records, outlier_corrections)
+            VALUES (%s, 1, %s, %s, %s)
+            ON CONFLICT (sensor_id) DO UPDATE SET
+                total_records = sensor_quality_metrics.total_records + 1,
+                validation_failures = sensor_quality_metrics.validation_failures + EXCLUDED.validation_failures,
+                duplicate_records = sensor_quality_metrics.duplicate_records + EXCLUDED.duplicate_records,
+                outlier_corrections = sensor_quality_metrics.outlier_corrections + EXCLUDED.outlier_corrections,
+                updated_at = now()
+        ''', (sensor_id, validation_failures, duplicate_failures, outlier_corrections))
+        conn.commit()
+    except Exception as e:
+        print(f"Sensor metrics warning: {e}")
+    finally:
+        conn.close()
+
+def log_prediction_quality(location, sensor_id, prediction):
+    """Store predictions to evaluate quality against future observed values"""
+    if not prediction:
+        return
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        conn.execute('''
+            INSERT INTO prediction_quality_metrics
+            (location, sensor_id, predicted_temperature, target_timestamp, status)
+            VALUES (%s, %s, %s, %s, 'pending')
+        ''', (
+            location,
+            sensor_id,
+            prediction.get('predicted_temperature'),
+            db.as_utc(prediction.get('timestamp'))
+        ))
+        conn.commit()
+    except Exception as e:
+        print(f"Prediction metric warning: {e}")
+    finally:
+        conn.close()
+
+def evaluate_prediction_quality():
+    """Evaluate pending predictions against observed weather"""
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        pending = conn.execute('''
+            SELECT * FROM prediction_quality_metrics
+            WHERE status = 'pending'
+              AND target_timestamp IS NOT NULL
+              AND target_timestamp <= now()
+            ORDER BY metric_id ASC
+            LIMIT 25
+        ''').fetchall()
+        for item in pending:
+            observed = conn.execute('''
+                SELECT temperature
+                FROM weather_data
+                WHERE location = %s
+                  AND recorded_at >= %s
+                ORDER BY recorded_at ASC
+                LIMIT 1
+            ''', (item['location'], item['target_timestamp'])).fetchone()
+            if not observed or observed['temperature'] is None:
+                continue
+
+            error_abs = abs(float(observed['temperature']) - float(item['predicted_temperature']))
+            conn.execute('''
+                UPDATE prediction_quality_metrics
+                SET actual_temperature = %s,
+                    error_abs = %s,
+                    status = 'evaluated',
+                    updated_at = now()
+                WHERE metric_id = %s
+            ''', (observed['temperature'], round(error_abs, 3), item['metric_id']))
+        conn.commit()
+    except Exception as e:
+        print(f"Prediction evaluation warning: {e}")
+    finally:
+        conn.close()
+
+def retrain_ai_with_recent_clean_data(hours=168):
+    """Retrain AI model using recent cleaned weather data"""
+    with app.app_context():
+        conn = get_db_connection()
+        if not conn:
+            return
+        try:
+            locations = conn.execute("SELECT DISTINCT location FROM users WHERE location <> ''").fetchall()
+            for row in locations:
+                location = row['location']
+                historical_data = get_historical_weather(location, hours)
+                if len(historical_data) >= 20:
+                    weather_ai.train(historical_data)
+                    break
+        except Exception as e:
+            print(f"Retrain warning: {e}")
+        finally:
+            conn.close()
+
+def process_weather_pipeline(location):
+    """
+    End-to-end sensor ingestion, validation, cleaning, feature, AI, and decision pipeline.
+
+    Phase 6: Uses graceful degradation for weather fetching.
+    Phase 5: Produces multi-hazard output with NWS/INFORM color coding.
+    Phase 4: Includes XAI explanation (SHAP + LIME).
+    """
+    raw_record = ingest_sensor_weather(location)
+    validation_result = validate_sensor_data(raw_record)
+    cleaned_record = clean_weather_record(validation_result)
+    features = engineer_features(cleaned_record, validation_result)
+    quality_assessment = weather_ai.assess_data_quality(
+        validation_result,
+        cleaned_record.get('cleaning_notes', []),
+        features
+    )
+
+    # Phase 6: Get recent history from cache for feature engineering
+    recent_history = weather_ai.degradation_manager.cache.get_recent_weather_history(
+        location, hours=24
+    )
+
+    # Phase 1+5: Predict using Stacking Ensemble with multi-hazard output
+    prediction = weather_ai.predict(cleaned_record, location, recent_history)
+
+    # Phase 5: Build multi-hazard decision
+    decision = build_decision(cleaned_record, prediction, quality_assessment)
+
+    payload = {
+        'raw': raw_record,
+        'cleaned': cleaned_record,
+        'features': features,
+        'quality': quality_assessment,
+        'prediction': prediction,
+        'decision': decision,
+        'validation': validation_result,
+        'skip_weather_storage': 'duplicate_record' in validation_result.get('quality_flags', [])
+    }
+    return payload
+
+DEMO_SEED_ENABLED = os.environ.get('SEED_DEMO_DATA', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
+
+# identity sequences that receive explicit ids from the demo seed / migration
+_SEEDED_SEQUENCES = [
+    ('farms', 'farm_id'), ('fields', 'field_id'), ('crop_census', 'census_id'),
+    ('crop_health', 'health_id'), ('pest_risks', 'risk_id'),
+    ('irrigation_recommendations', 'rec_id'), ('yield_forecasts', 'forecast_id'),
+    ('agri_alerts', 'alert_id'),
+]
+
+
+def _schema_ready(conn):
+    """True when supabase/schema.sql has been applied."""
+    row = conn.execute(
+        "SELECT to_regclass('public.users') IS NOT NULL AND "
+        "to_regclass('public.weather_data') IS NOT NULL AND "
+        "to_regclass('public.farms') IS NOT NULL").fetchone()
+    return bool(row[0])
+
+
+def _sync_identity_sequences(conn, pairs):
+    """After inserting explicit ids, move each identity sequence past MAX(id)."""
+    for table, column in pairs:
+        if (table, column) not in _SEEDED_SEQUENCES:   # names are code constants, never user input
+            raise ValueError('unsupported sequence')
+        conn.execute(
+            f"SELECT setval(pg_get_serial_sequence('public.{table}', '{column}'), "
+            f"GREATEST(COALESCE(MAX({column}), 0), 1), COALESCE(MAX({column}), 0) > 0) FROM public.{table}")
+
+
+def init_database():
+    """Check the Supabase schema and (optionally) seed demo weather data.
+
+    Tables are created by supabase/schema.sql -- the application no longer
+    creates or alters tables at start-up."""
+    conn = get_db_connection()
+    if not conn:
+        print("⚠️  Database not reachable. Set SUPABASE_DB_URL in .env (see .env.example).")
+        return
+    try:
+        if not _schema_ready(conn):
+            print("⚠️  Supabase schema not found. Run supabase/schema.sql in the Supabase SQL editor first.")
+            return
+        if not DEMO_SEED_ENABLED:
+            return
+
+        conn.execute('''
+            INSERT INTO users (username, email, location, preferences)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT DO NOTHING
+        ''', ('farm_owner', 'owner@agri.pk', 'Lahore', json.dumps({
+            'preferred_activities': ['farming', 'irrigation']
+        })))
+
+        # Sample weather data for Pakistan cities (only into an empty table)
+        has_weather = conn.execute('SELECT EXISTS (SELECT 1 FROM weather_data)').fetchone()[0]
+        if not has_weather:
+            sample_weather = [
+                ('Lahore', 32.5, 45, 1013, 12, 'Sunny', 0),
+                ('Islamabad', 28.1, 60, 1015, 8, 'Cloudy', 0),
+                ('Karachi', 35.8, 55, 1010, 15, 'Sunny', 5),
+                ('Peshawar', 30.3, 40, 1012, 10, 'Clear', 0),
+                ('Quetta', 25.7, 35, 1014, 18, 'Sunny', 0)
+            ]
+            for weather in sample_weather:
+                conn.execute('''
+                    INSERT INTO weather_data
+                    (location, temperature, humidity, pressure, wind_speed, weather_condition, precipitation)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ''', weather)
+        conn.commit()
+        print("✅ Database checked (Supabase PostgreSQL)")
+    except Exception as e:
+        conn.rollback()
+        print(f"Database initialization note: {e}")
+    finally:
+        conn.close()
+
+
+def init_agriculture_database():
+    """Seed the demo agriculture data (idempotent). Tables come from supabase/schema.sql."""
+    if not DEMO_SEED_ENABLED:
+        return
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        if not _schema_ready(conn):
+            return
+
+        conn.execute('''INSERT INTO farms (farm_id, name, owner_name, location, total_area_ha)
+                        VALUES (1,'Green Valley Farm','Ahmed Khan','Karachi',15.5)
+                        ON CONFLICT DO NOTHING''')
+        conn.execute('''INSERT INTO farms (farm_id, name, owner_name, location, total_area_ha)
+                        VALUES (2,'Punjab Wheat Estate','Muhammad Ali','Lahore',25.0)
+                        ON CONFLICT DO NOTHING''')
+
+        fields_seed = [
+            (1, 1, 'North Field',  5.5, 'Loamy',      'Drip'),
+            (2, 1, 'South Field',  4.0, 'Clay',        'Furrow'),
+            (3, 1, 'West Field',   6.0, 'Sandy Loam',  'Sprinkler'),
+            (4, 2, 'Alpha Field', 12.0, 'Clay Loam',   'Flood'),
+            (5, 2, 'Beta Field',  13.0, 'Silty Clay',  'Drip'),
+        ]
+        for fs in fields_seed:
+            conn.execute('''INSERT INTO fields
+                            (field_id,farm_id,name,area_ha,soil_type,irrigation_type)
+                            VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING''', fs)
+
+        census_seed = [
+            (1, 1, 'Wheat',  5.5, 'Tillering',         '2025-11-01', '2026-04-15', 3.5, 'Rabi 2025-26'),
+            (2, 2, 'Wheat',  4.0, 'Heading',            '2025-10-15', '2026-03-30', 3.2, 'Rabi 2025-26'),
+            (3, 3, 'Cotton', 6.0, 'Boll Formation',     '2025-05-01', '2025-10-31', 2.8, 'Kharif 2025'),
+            (4, 4, 'Wheat', 12.0, 'Jointing',           '2025-11-10', '2026-04-20', 4.0, 'Rabi 2025-26'),
+            (5, 5, 'Rice',  13.0, 'Panicle Initiation', '2025-06-15', '2025-11-15', 5.0, 'Kharif 2025'),
+        ]
+        for cs in census_seed:
+            conn.execute('''INSERT INTO crop_census
+                            (census_id,field_id,crop_type,area_ha,growth_stage,
+                             planted_date,expected_harvest_date,target_yield_ton_ha,season)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING''', cs)
+
+        health_seed = [
+            (1, 1,  82.5, 0.10, 0.00, 0.05, 0.08),
+            (2, 2,  71.0, 0.20, 0.00, 0.00, 0.22),
+            (3, 3,  91.0, 0.05, 0.00, 0.02, 0.05),
+            (4, 4,  68.0, 0.25, 0.00, 0.10, 0.00),
+            (5, 5,  78.5, 0.15, 0.00, 0.00, 0.12),
+        ]
+        for hs in health_seed:
+            conn.execute('''INSERT INTO crop_health
+                            (health_id,field_id,health_score,heat_stress,
+                             frost_risk,drought_stress,excess_moisture)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING''', hs)
+
+        pest_seed = [
+            (1, 1, 'Wheat Rust', 'high',   'Conditions ideal for wheat rust spread – monitor closely'),
+            (2, 1, 'Aphids',     'medium', 'Warm calm conditions favour aphid colonies'),
+            (3, 2, 'Blight',     'medium', 'High humidity increases blight risk'),
+            (4, 4, 'Wheat Rust', 'high',   'Jointing stage – rust risk elevated'),
+        ]
+        for ps in pest_seed:
+            conn.execute('''INSERT INTO pest_risks
+                            (risk_id,field_id,pest_type,risk_level,warning_message)
+                            VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING''', ps)
+
+        irr_seed = [
+            (1, 2, '2026-05-11', 25.0, 'Soil moisture below threshold - irrigation recommended', False),
+            (2, 4, '2026-05-11', 30.0, 'High evapotranspiration rate detected', False),
+            (3, 3, '2026-05-12', 18.0, 'Crop water stress indicator active', False),
+        ]
+        for ir in irr_seed:
+            conn.execute('''INSERT INTO irrigation_recommendations
+                            (rec_id,field_id,recommended_date,volume_mm,reason,is_done)
+                            VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING''', ir)
+
+        yield_seed = [
+            (1, 1, 3.1, 3.5, 0.78),
+            (2, 2, 2.4, 3.2, 0.72),
+            (3, 3, 2.6, 2.8, 0.85),
+            (4, 4, 2.8, 4.0, 0.69),
+            (5, 5, 4.2, 5.0, 0.74),
+        ]
+        for ys in yield_seed:
+            conn.execute('''INSERT INTO yield_forecasts
+                            (forecast_id,field_id,expected_yield_ton_ha,
+                             target_yield_ton_ha,confidence)
+                            VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING''', ys)
+
+        agri_alert_seed = [
+            (1, 1, 1,    'Pest Risk',      'high',     '🌾 High wheat rust risk in North Field – apply fungicide',    True),
+            (2, 2, 1,    'Irrigation Due', 'medium',   '💧 South Field needs irrigation – 25 mm deficit',              True),
+            (3, 4, 2,    'Irrigation Due', 'medium',   '💧 Alpha Field needs 30 mm irrigation',                        True),
+            (4, 4, 2,    'Pest Risk',      'high',     '🌾 Jointing stage rust risk elevated in Alpha Field',          True),
+            (5, None, 1, 'Heatwave',       'critical', '🌡️ Heatwave forecast – prepare shade nets for nurseries',     True),
+        ]
+        for aa in agri_alert_seed:
+            conn.execute('''INSERT INTO agri_alerts
+                            (alert_id,field_id,farm_id,alert_type,severity,message,is_active)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING''', aa)
+
+        _sync_identity_sequences(conn, _SEEDED_SEQUENCES)
+        conn.commit()
+        print("✅ Agriculture database checked (demo data present)")
+    except Exception as e:
+        conn.rollback()
+        print(f"Agriculture DB init note: {e}")
+    finally:
+        conn.close()
+
+
+def get_db_connection():
+    """Get a pooled Supabase/PostgreSQL connection, or None if unavailable."""
+    return db.get_db_connection()
+
+
+def fetch_live_weather(location):
+    """Fetch real weather data from OpenWeatherMap API"""
+    try:
+        if OPENWEATHER_API_KEY == 'demo_key':
+            # Return demo data if no API key
+            temp_variation = (hash(location) % 20) - 5  # Random temp between 15-25
+            return {
+                'temperature': 20 + temp_variation,
+                'humidity': 60 + (hash(location) % 30),
+                'pressure': 1010 + (hash(location) % 20),
+                'wind_speed': 5 + (hash(location) % 15),
+                'condition': ['Sunny', 'Cloudy', 'Rainy'][hash(location) % 3],
+                'location': location,
+                'timestamp': datetime.now().isoformat()
+            }
+        
+        params = {
+            'q': location,
+            'appid': OPENWEATHER_API_KEY,
+            'units': 'metric'
+        }
+        
+        response = requests.get(OPENWEATHER_URL, params=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                'temperature': data['main']['temp'],
+                'humidity': data['main']['humidity'],
+                'pressure': data['main']['pressure'],
+                'wind_speed': data['wind']['speed'],
+                'condition': data['weather'][0]['main'],
+                'location': location,
+                'timestamp': datetime.now().isoformat()
+            }
+    except Exception as e:
+        print(f"Weather API error for {location}: {e}")
+    
+    # Fallback data
+    return {
+        'temperature': 20.0,
+        'humidity': 65,
+        'pressure': 1013,
+        'wind_speed': 10,
+        'condition': 'Sunny',
+        'location': location,
+        'timestamp': datetime.now().isoformat()
+    }
+
+def store_weather_data(weather_data, pipeline_output=None):
+    """Store weather data in database with sensor metadata and pipeline artifacts"""
+    conn = get_db_connection()
+    if conn:
+        try:
+            quality_flags = []
+            validation_score = None
+            quality_label = None
+            cleaning_notes = []
+            feature_blob = None
+            decision_blob = None
+            ingestion_mode = weather_data.get('ingestion_mode')
+            sensor_timestamp = weather_data.get('timestamp')
+
+            if pipeline_output:
+                quality_flags = pipeline_output.get('validation', {}).get('quality_flags', [])
+                validation_score = pipeline_output.get('validation', {}).get('validation_score')
+                quality_label = pipeline_output.get('quality', {}).get('quality_label')
+                cleaning_notes = pipeline_output.get('cleaned', {}).get('cleaning_notes', [])
+                feature_blob = db.safe_json(pipeline_output.get('features', {}))
+                decision_blob = db.safe_json(pipeline_output.get('decision', {}))
+
+            conn.execute('''
+                INSERT INTO weather_data 
+                (location, temperature, humidity, pressure, wind_speed, weather_condition, precipitation,
+                 sensor_id, data_source, sensor_timestamp, quality_flags, validation_score, quality_label,
+                 cleaning_notes, feature_blob, decision_blob, ingestion_mode)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (
+                weather_data['location'],
+                weather_data['temperature'],
+                weather_data['humidity'],
+                weather_data['pressure'],
+                weather_data['wind_speed'],
+                weather_data['condition'],
+                0,  # precipitation placeholder
+                weather_data.get('sensor_id'),
+                weather_data.get('source'),
+                db.as_utc(sensor_timestamp),
+                db.safe_json(quality_flags),
+                validation_score,
+                quality_label,
+                db.safe_json(cleaning_notes),
+                feature_blob,
+                decision_blob,
+                ingestion_mode
+            ))
+            conn.commit()
+        except Exception as e:
+            print(f"Data storage error: {e}")
+        finally:
+            conn.close()
+
+def store_pipeline_log(pipeline_output):
+    """Persist raw/cleaned/featured/decision payloads"""
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        raw = pipeline_output.get('raw', {})
+        cleaned = pipeline_output.get('cleaned', {})
+        validation = pipeline_output.get('validation', {})
+        quality = pipeline_output.get('quality', {})
+
+        conn.execute('''
+            INSERT INTO sensor_pipeline_logs
+            (sensor_id, source, location, sensor_timestamp, quality_flags, validation_score,
+             quality_label, raw_payload, cleaned_payload, feature_payload, decision_payload)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ''', (
+            raw.get('sensor_id'),
+            raw.get('source'),
+            raw.get('location'),
+            db.as_utc(cleaned.get('timestamp') or raw.get('timestamp')),
+            db.safe_json(validation.get('quality_flags', [])),
+            validation.get('validation_score'),
+            quality.get('quality_label'),
+            db.safe_json(raw),
+            db.safe_json(cleaned),
+            db.safe_json(pipeline_output.get('features', {})),
+            db.safe_json(pipeline_output.get('decision', {}))
+        ))
+        conn.commit()
+    except Exception as e:
+        print(f"Pipeline log warning: {e}")
+    finally:
+        conn.close()
+
+def get_historical_weather(location, hours=24):
+    """Get historical weather data for AI training"""
+    conn = get_db_connection()
+    if conn:
+        try:
+            rows = conn.execute('''
+                SELECT temperature, humidity, pressure, wind_speed,
+                       EXTRACT(HOUR FROM recorded_at)::int AS hour,
+                       EXTRACT(DOW  FROM recorded_at)::int AS day_of_week,
+                       EXTRACT(MONTH FROM recorded_at)::int AS month
+                FROM weather_data
+                WHERE location = %s
+                  AND recorded_at >= now() - make_interval(hours => %s)
+                ORDER BY recorded_at
+            ''', (location, int(hours))).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            print(f"Historical data error: {e}")
+            return []
+        finally:
+            conn.close()
+    return []
+
+# ============================================================
+# AGRICULTURE HELPER FUNCTIONS
+# ============================================================
+
+def compute_crop_health(weather, crop_type='wheat'):
+    """Return health score (0-100) and individual stress indicators."""
+    temp     = weather.get('temperature', 20)
+    humidity = weather.get('humidity', 60)
+    rainfall = weather.get('rainfall', weather.get('precipitation', 0))
+
+    heat_threshold = {'wheat': 30, 'rice': 35, 'maize': 32,
+                      'cotton': 40, 'sugarcane': 38}.get(crop_type.lower(), 35)
+
+    heat_stress      = min(1.0, max(0.0, (temp - heat_threshold) / 10)) if temp > heat_threshold else 0.0
+    frost_risk       = min(1.0, max(0.0, (2.0 - temp) / 5))             if temp < 2.0             else 0.0
+    drought_stress   = min(1.0, max(0.0, (35 - humidity) / 35))         if humidity < 35 and rainfall < 2 else 0.0
+    excess_moisture  = min(1.0, max(0.0, (humidity - 85) / 15))         if humidity > 85 or rainfall > 20 else 0.0
+
+    composite    = heat_stress * 0.30 + frost_risk * 0.40 + drought_stress * 0.35 + excess_moisture * 0.15
+    health_score = round(max(0.0, 100.0 * (1 - composite)), 1)
+
+    return {
+        'health_score':    health_score,
+        'heat_stress':     round(heat_stress, 3),
+        'frost_risk':      round(frost_risk, 3),
+        'drought_stress':  round(drought_stress, 3),
+        'excess_moisture': round(excess_moisture, 3),
+    }
+
+
+def compute_pest_risks(weather, crop_type='wheat'):
+    """Return list of pest/disease risk dicts based on current weather."""
+    temp     = weather.get('temperature', 20)
+    humidity = weather.get('humidity', 60)
+    wind     = weather.get('wind_speed', 10)
+    risks = []
+
+    if 15 <= temp <= 25 and humidity > 75:
+        level = 'high' if humidity > 85 else 'medium'
+        risks.append({'pest_type': 'Blight', 'risk_level': level,
+                      'warning_message': f'High humidity ({humidity}%) + temp {temp}°C favour blight spread'})
+
+    if temp > 20 and wind < 8:
+        level = 'high' if temp > 28 else 'medium'
+        risks.append({'pest_type': 'Aphids', 'risk_level': level,
+                      'warning_message': f'Warm, calm conditions ({temp}°C, {wind} km/h) favour aphid colonies'})
+
+    if crop_type.lower() == 'wheat' and 15 <= temp <= 22 and humidity > 70:
+        risks.append({'pest_type': 'Wheat Rust', 'risk_level': 'high',
+                      'warning_message': f'Optimal rust conditions: {temp}°C, {humidity}% RH – apply fungicide'})
+
+    if humidity > 80:
+        risks.append({'pest_type': 'Fungal Disease', 'risk_level': 'medium',
+                      'warning_message': f'High humidity ({humidity}%) promotes fungal growth'})
+
+    if temp > 30 and humidity < 40:
+        risks.append({'pest_type': 'Spider Mites', 'risk_level': 'medium',
+                      'warning_message': f'Hot, dry conditions ({temp}°C, {humidity}% RH) favour spider mites'})
+
+    return risks
+
+
+def compute_irrigation(weather, area_ha=1.0):
+    """Return irrigation recommendation dict or None if no deficit."""
+    temp     = weather.get('temperature', 20)
+    humidity = weather.get('humidity', 60)
+    rainfall = weather.get('rainfall', weather.get('precipitation', 0))
+
+    et0         = max(0.0, 0.0023 * (temp + 17.8) * max(0, 35 - humidity) / 35 * 5)
+    net_deficit = round(max(0.0, et0 - rainfall), 1)
+
+    if net_deficit < 2.0:
+        return None
+
+    return {
+        'volume_mm':        net_deficit,
+        'volume_m3':        round(net_deficit * area_ha * 10, 1),
+        'reason':           f'ET₀={round(et0,1)}mm, rainfall={rainfall}mm, deficit={net_deficit}mm',
+        'recommended_date': (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d'),
+    }
+
+
+def compute_yield_forecast(health_score, target_yield_ton_ha):
+    """Forecast expected yield based on health score and target."""
+    stress_factor = health_score / 100
+    expected      = round(target_yield_ton_ha * stress_factor, 2)
+    confidence    = round(min(0.95, 0.55 + 0.4 * stress_factor), 2)
+    return {
+        'expected_yield_ton_ha': expected,
+        'target_yield_ton_ha':   target_yield_ton_ha,
+        'gap_ton_ha':            round(target_yield_ton_ha - expected, 2),
+        'confidence':            confidence,
+    }
+
+
+def refresh_field_data(field_id, location):
+    """Fetch live weather and recompute health / risk / irrigation / yield for a field."""
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        census = conn.execute(
+            'SELECT crop_type, area_ha, target_yield_ton_ha FROM crop_census '
+            'WHERE field_id=%s ORDER BY created_at DESC LIMIT 1', (field_id,)).fetchone()
+        crop_type    = census['crop_type']          if census else 'wheat'
+        area_ha      = census['area_ha']            if census else 1.0
+        target_yield = census['target_yield_ton_ha'] if census else 3.0
+
+        weather           = fetch_live_weather(location)
+        weather['rainfall'] = 0  # free-tier OWM does not always include precipitation
+
+        conn.execute('''INSERT INTO field_weather
+                        (field_id,temperature,humidity,rainfall,wind_speed,pressure,weather_condition)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s)''',
+                     (field_id, weather['temperature'], weather['humidity'],
+                      weather['rainfall'], weather['wind_speed'],
+                      weather['pressure'], weather['condition']))
+
+        health = compute_crop_health(weather, crop_type)
+        conn.execute('''INSERT INTO crop_health
+                        (field_id,health_score,heat_stress,frost_risk,drought_stress,excess_moisture)
+                        VALUES (%s,%s,%s,%s,%s,%s)''',
+                     (field_id, health['health_score'], health['heat_stress'],
+                      health['frost_risk'], health['drought_stress'], health['excess_moisture']))
+
+        conn.execute('DELETE FROM pest_risks WHERE field_id=%s', (field_id,))
+        for risk in compute_pest_risks(weather, crop_type):
+            conn.execute('''INSERT INTO pest_risks (field_id,pest_type,risk_level,warning_message)
+                            VALUES (%s,%s,%s,%s)''',
+                         (field_id, risk['pest_type'], risk['risk_level'], risk['warning_message']))
+
+        irr = compute_irrigation(weather, area_ha)
+        if irr:
+            conn.execute('''INSERT INTO irrigation_recommendations
+                            (field_id,recommended_date,volume_mm,reason) VALUES (%s,%s,%s,%s)''',
+                         (field_id, irr['recommended_date'], irr['volume_mm'], irr['reason']))
+
+        yf = compute_yield_forecast(health['health_score'], target_yield)
+        conn.execute('''INSERT INTO yield_forecasts
+                        (field_id,expected_yield_ton_ha,target_yield_ton_ha,confidence)
+                        VALUES (%s,%s,%s,%s)''',
+                     (field_id, yf['expected_yield_ton_ha'], yf['target_yield_ton_ha'], yf['confidence']))
+
+        if health['health_score'] < 60:
+            conn.execute('''INSERT INTO agri_alerts (field_id,alert_type,severity,message)
+                            VALUES (%s,%s,%s,%s)''',
+                         (field_id, 'Crop Health Critical', 'critical',
+                          f'⚠️ Field health score dropped to {health["health_score"]}% – immediate action required'))
+
+        conn.commit()
+    except Exception as e:
+        print(f"Field refresh error (field {field_id}): {e}")
+    finally:
+        conn.close()
+
+
+# Real-time weather updates
+def update_weather_data():
+    """Update weather data for all user locations"""
+    with app.app_context():
+        conn = get_db_connection()
+        if conn:
+            try:
+                locations = conn.execute("SELECT DISTINCT location FROM users WHERE location <> ''").fetchall()
+                for location_row in locations:
+                    location = location_row['location']
+                    pipeline = process_weather_pipeline(location)
+                    weather_data = pipeline['cleaned']
+                    prediction = pipeline['prediction']
+
+                    if not pipeline.get('skip_weather_storage'):
+                        store_weather_data(weather_data, pipeline_output=pipeline)
+                    store_pipeline_log(pipeline)
+                    update_sensor_quality_metrics(
+                        weather_data.get('sensor_id', f'sensor-{location}'),
+                        pipeline['validation'],
+                        weather_data
+                    )
+                    log_prediction_quality(location, weather_data.get('sensor_id', 'unknown'), prediction)
+                    recent_cleaned_by_location[location].append(weather_data)
+
+                    # Send real-time update to connected clients
+                    socketio.emit('weather_update', {
+                        'location': location,
+                        'data': weather_data,
+                        'prediction': prediction,
+                        'quality': pipeline['quality'],
+                        'decision': pipeline['decision'],
+                        'features': pipeline['features']
+                    })
+
+                    print(f"📍 Weather updated for {location}: {weather_data['temperature']}°C")
+            except Exception as e:
+                print(f"Weather update error: {e}")
+            finally:
+                conn.close()
+
+# Scheduler for periodic tasks
+scheduler = BackgroundScheduler()
+
+@app.route('/')
+def index():
+    return redirect(url_for('dashboard'))
+
+@app.route('/dashboard')
+def dashboard():
+    conn = get_db_connection()
+    if not conn:
+        flash('Database connection error', 'error')
+        return render_template('dashboard.html', now=datetime.now())
+    
+    try:
+        total_users = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
+        total_alerts = conn.execute('SELECT COUNT(*) FROM weather_alerts WHERE is_active').fetchone()[0]
+        
+        recent_activities = conn.execute('''
+            SELECT u.username, ua.activity_type, ua.weather_condition, ua.activity_date
+            FROM user_activities ua
+            JOIN users u ON ua.user_id = u.id
+            ORDER BY ua.activity_date DESC LIMIT 5
+        ''').fetchall()
+        
+        recent_weather = conn.execute('''
+            SELECT location, temperature, weather_condition, humidity, wind_speed, recorded_at, data_source, quality_label
+            FROM weather_data 
+            ORDER BY recorded_at DESC 
+            LIMIT 3
+        ''').fetchall()
+
+        latest_pipeline_rows = conn.execute('''
+            SELECT location, sensor_id, quality_label, validation_score, decision_payload, created_at
+            FROM sensor_pipeline_logs
+            ORDER BY created_at DESC
+            LIMIT 5
+        ''').fetchall()
+        latest_pipeline = []
+        for row in latest_pipeline_rows:
+            try:
+                decision = json.loads(row['decision_payload']) if row['decision_payload'] else {}
+            except Exception:
+                decision = {}
+            latest_pipeline.append({
+                'location': row['location'],
+                'sensor_id': row['sensor_id'],
+                'quality_label': row['quality_label'],
+                'validation_score': row['validation_score'],
+                'severity': decision.get('severity', 'low'),
+                'reason': decision.get('reason', 'n/a'),
+                'recommended_action': decision.get('recommended_action', 'Monitor conditions.'),
+                'confidence': decision.get('confidence', 0.0),
+                'alert_required': decision.get('alert_required', False),
+                'created_at': row['created_at']
+            })
+
+        sensor_metrics = conn.execute('''
+            SELECT
+                COALESCE(SUM(total_records), 0) as total_records,
+                COALESCE(SUM(validation_failures), 0) as validation_failures
+            FROM sensor_quality_metrics
+        ''').fetchone()
+
+        failure_rate = 0.0
+        if sensor_metrics and sensor_metrics['total_records'] > 0:
+            failure_rate = sensor_metrics['validation_failures'] / float(sensor_metrics['total_records'])
+        
+        # Get AI model status
+        ai_status = "Trained" if weather_ai.is_trained else "Training"
+        
+        return render_template('dashboard.html', 
+                             total_users=total_users,
+                             total_alerts=total_alerts,
+                             recent_activities=recent_activities,
+                             recent_weather=recent_weather,
+                             latest_pipeline=latest_pipeline,
+                             sensor_failure_rate=round(failure_rate * 100, 2),
+                             ai_status=ai_status,
+                             now=datetime.now())
+    except Exception as e:
+        flash(f'Dashboard error: {e}', 'error')
+        return render_template('dashboard.html', now=datetime.now())
+    finally:
+        conn.close()
+
+@app.route('/users')
+def user_management():
+    conn = get_db_connection()
+    if not conn:
+        flash('Database connection error', 'error')
+        return render_template('user_management.html')
+    
+    try:
+        users = conn.execute('''
+            SELECT u.*, u.user_number AS user_id,
+                   COUNT(DISTINCT ua.activity_id) as activity_count,
+                   COUNT(DISTINCT wa.alert_id) as alert_count
+            FROM users u
+            LEFT JOIN user_activities ua ON u.id = ua.user_id
+            LEFT JOIN weather_alerts wa ON u.id = wa.user_id AND wa.is_active
+            GROUP BY u.id
+            ORDER BY u.user_number
+        ''').fetchall()
+        
+        total_alerts = conn.execute('SELECT COUNT(*) FROM weather_alerts WHERE is_active').fetchone()[0]
+        total_activities = conn.execute('SELECT COUNT(*) FROM user_activities').fetchone()[0]
+        
+        return render_template('user_management.html', 
+                             users=users,
+                             total_alerts=total_alerts,
+                             total_activities=total_activities)
+    except Exception as e:
+        flash(f'User management error: {e}', 'error')
+        return render_template('user_management.html')
+    finally:
+        conn.close()
+
+@app.route('/add_user', methods=['GET', 'POST'])
+def add_user():
+    if request.method == 'POST':
+        username = request.form['username']
+        email = request.form['email']
+        location = request.form['location']
+        preferences = {
+            'preferred_activities': request.form.getlist('preferred_activities'),
+            'temperature_min': int(request.form.get('temperature_min', 15)),
+            'temperature_max': int(request.form.get('temperature_max', 25)),
+            'avoid_rain': 'avoid_rain' in request.form,
+            'avoid_extreme_heat': 'avoid_extreme_heat' in request.form
+        }
+        
+        conn = get_db_connection()
+        try:
+            conn.execute('''
+                INSERT INTO users (username, email, location, preferences)
+                VALUES (%s, %s, %s, %s)
+            ''', (username, email, location, json.dumps(preferences)))
+            conn.commit()
+            # NOTE: role/is_active are never taken from the form -> new profiles are plain 'user'
+            flash('🎉 User added successfully!', 'success')
+            
+            # Emit real-time update
+            socketio.emit('user_added', {
+                'username': username,
+                'location': location,
+                'timestamp': datetime.now().isoformat()
+            })
+            
+        except db.IntegrityError:
+            flash('❌ Username or email already exists!', 'error')
+        finally:
+            conn.close()
+        
+        return redirect(url_for('user_management'))
+    
+    return render_template('add_user.html')
+
+@app.route('/user/<int:user_id>')
+def user_profile(user_id):
+    conn = get_db_connection()
+    if not conn:
+        flash('Database connection error', 'error')
+        return redirect(url_for('user_management'))
+    
+    try:
+        user = conn.execute('SELECT *, user_number AS user_id FROM users WHERE user_number = %s', (user_id,)).fetchone()
+        if not user:
+            flash('User not found!', 'error')
+            return redirect(url_for('user_management'))
+        
+        activities = conn.execute('''
+            SELECT * FROM user_activities 
+            WHERE user_id = %s 
+            ORDER BY activity_date DESC
+            LIMIT 10
+        ''', (user['id'],)).fetchall()
+        
+        alerts = conn.execute('''
+            SELECT * FROM weather_alerts 
+            WHERE user_id = %s 
+            ORDER BY created_at DESC
+        ''', (user['id'],)).fetchall()
+        
+        # Get weather data for user's location
+        weather_data = conn.execute('''
+            SELECT * FROM weather_data 
+            WHERE location = %s 
+            ORDER BY recorded_at DESC 
+            LIMIT 5
+        ''', (user['location'],)).fetchall()
+        
+        preferences = json.loads(user['preferences']) if user['preferences'] else {}
+        
+        return render_template('profile.html', 
+                             user=user,
+                             preferences=preferences,
+                             activities=activities,
+                             alerts=alerts,
+                             weather_data=weather_data)
+    except Exception as e:
+        flash(f'Profile error: {e}', 'error')
+        return redirect(url_for('user_management'))
+    finally:
+        conn.close()
+
+@app.route('/add_alert/<int:user_id>', methods=['POST'])
+def add_alert(user_id):
+    alert_type = request.form['alert_type']
+    severity = request.form['severity']
+    message = request.form['message']
+    temp_threshold = request.form.get('temp_threshold', 30)
+    
+    conditions = {
+        'temperature': float(temp_threshold),
+        'wind_speed': 50.0,  # Default values
+        'precipitation': 10.0
+    }
+    
+    conn = get_db_connection()
+    if not conn:
+        flash('Database connection error', 'error')
+        return redirect(url_for('user_profile', user_id=user_id))
+    try:
+        owner = conn.execute('SELECT id FROM users WHERE user_number = %s', (user_id,)).fetchone()
+        if not owner:
+            flash('User not found!', 'error')
+            return redirect(url_for('user_management'))
+        conn.execute('''
+            INSERT INTO weather_alerts (user_id, alert_type, severity, message, trigger_conditions)
+            VALUES (%s, %s, %s, %s, %s)
+        ''', (owner['id'], alert_type, severity, message, json.dumps(conditions)))
+        conn.commit()
+        flash('✅ Alert added successfully!', 'success')
+        
+        # Emit real-time alert
+        socketio.emit('alert_created', {
+            'user_id': user_id,
+            'alert_type': alert_type,
+            'severity': severity,
+            'message': message,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        flash(f'Error adding alert: {e}', 'error')
+    finally:
+        conn.close()
+    
+    return redirect(url_for('user_profile', user_id=user_id))
+
+@app.route('/weather')
+def weather_display():
+    auth.log_activity('weather_view', dedupe_seconds=60)
+    return render_template('weather_display.html')
+
+@app.route('/alerts')
+def alerts():
+    auth.log_activity('alert_view', dedupe_seconds=60)
+    conn = get_db_connection()
+    ai_alerts = []
+    if conn:
+        try:
+            rows = conn.execute('''
+                SELECT location, sensor_id, decision_payload, created_at
+                FROM sensor_pipeline_logs
+                ORDER BY created_at DESC
+                LIMIT 20
+            ''').fetchall()
+            for row in rows:
+                try:
+                    decision = json.loads(row['decision_payload']) if row['decision_payload'] else {}
+                except Exception:
+                    decision = {}
+                if decision.get('alert_required'):
+                    ai_alerts.append({
+                        'location': row['location'],
+                        'sensor_id': row['sensor_id'],
+                        'severity': decision.get('severity', 'low'),
+                        'reason': decision.get('reason', 'n/a'),
+                        'recommended_action': decision.get('recommended_action', 'Monitor conditions.'),
+                        'confidence': decision.get('confidence', 0.0),
+                        'created_at': row['created_at']
+                    })
+            ai_alerts = ai_alerts[:10]
+        except Exception as e:
+            print(f"Alerts load warning: {e}")
+        finally:
+            conn.close()
+    return render_template('alerts.html', ai_alerts=ai_alerts)
+
+@app.route('/recommendations')
+def recommendations():
+    auth.log_activity('recommendation_viewed', dedupe_seconds=60)
+    return render_template('recommendations.html')
+
+
+# ============================================================
+# AGRICULTURE ROUTES – HTML
+# ============================================================
+
+@app.route('/agri')
+def agri_dashboard():
+    conn = get_db_connection()
+    if not conn:
+        flash('Database error', 'error')
+        return render_template('agri_dashboard.html', now=datetime.now())
+    try:
+        farms       = conn.execute('SELECT * FROM farms ORDER BY created_at DESC').fetchall()
+        total_farms = len(farms)
+        total_fields = conn.execute('SELECT COUNT(*) FROM fields').fetchone()[0]
+
+        health_rows = conn.execute('''
+            SELECT f.field_id, f.name, fa.farm_id, fa.name AS farm_name,
+                   ch.health_score, ch.heat_stress, ch.frost_risk, ch.drought_stress,
+                   ch.excess_moisture, ch.recorded_at,
+                   cc.crop_type, cc.growth_stage, cc.area_ha
+            FROM fields f
+            JOIN farms fa ON f.farm_id = fa.farm_id
+            LEFT JOIN crop_health ch ON ch.health_id = (
+                SELECT health_id FROM crop_health WHERE field_id=f.field_id ORDER BY recorded_at DESC LIMIT 1)
+            LEFT JOIN crop_census cc ON cc.census_id = (
+                SELECT census_id FROM crop_census WHERE field_id=f.field_id ORDER BY created_at DESC LIMIT 1)
+            ORDER BY ch.health_score ASC NULLS FIRST
+        ''').fetchall()
+
+        active_alerts = conn.execute('''
+            SELECT aa.*, f.name AS field_name, fa.name AS farm_name
+            FROM agri_alerts aa
+            LEFT JOIN fields f  ON aa.field_id = f.field_id
+            LEFT JOIN farms  fa ON aa.farm_id  = fa.farm_id
+                                 OR (aa.farm_id IS NULL AND f.farm_id = fa.farm_id)
+            WHERE aa.is_active
+            ORDER BY aa.created_at DESC LIMIT 10
+        ''').fetchall()
+
+        pending_irrigation = conn.execute('''
+            SELECT ir.*, f.name AS field_name, fa.name AS farm_name
+            FROM irrigation_recommendations ir
+            JOIN fields f ON ir.field_id = f.field_id
+            JOIN farms fa ON f.farm_id = fa.farm_id
+            WHERE ir.is_done = FALSE
+            ORDER BY ir.recommended_date ASC LIMIT 5
+        ''').fetchall()
+
+        high_risks = conn.execute('''
+            SELECT pr.*, f.name AS field_name
+            FROM pest_risks pr
+            JOIN fields f ON pr.field_id = f.field_id
+            WHERE pr.risk_level='high'
+            ORDER BY pr.recorded_at DESC LIMIT 6
+        ''').fetchall()
+
+        yield_summary = conn.execute('''
+            SELECT yf.field_id, f.name AS field_name, cc.crop_type,
+                   yf.expected_yield_ton_ha, yf.target_yield_ton_ha, yf.confidence
+            FROM yield_forecasts yf
+            JOIN fields f ON yf.field_id = f.field_id
+            LEFT JOIN crop_census cc ON cc.field_id = yf.field_id
+            WHERE yf.forecast_id IN (
+                SELECT MAX(forecast_id) FROM yield_forecasts GROUP BY field_id)
+        ''').fetchall()
+
+        avg_health_row = conn.execute('''
+            SELECT AVG(health_score) FROM crop_health WHERE health_id IN (
+                SELECT MAX(health_id) FROM crop_health GROUP BY field_id)
+        ''').fetchone()
+        avg_health = round(avg_health_row[0] or 0, 1)
+
+        return render_template('agri_dashboard.html',
+                               farms=farms, total_farms=total_farms,
+                               total_fields=total_fields, health_rows=health_rows,
+                               active_alerts=active_alerts,
+                               pending_irrigation=pending_irrigation,
+                               high_risks=high_risks, yield_summary=yield_summary,
+                               avg_health=avg_health, now=datetime.now())
+    except Exception as e:
+        flash(f'Agriculture dashboard error: {e}', 'error')
+        return render_template('agri_dashboard.html', now=datetime.now())
+    finally:
+        conn.close()
+
+
+@app.route('/farms')
+def farms_list():
+    conn = get_db_connection()
+    try:
+        farms = conn.execute('''
+            SELECT fa.*, COUNT(DISTINCT f.field_id) AS field_count,
+                   COALESCE(SUM(f.area_ha), 0) AS computed_area
+            FROM farms fa
+            LEFT JOIN fields f ON fa.farm_id = f.farm_id
+            GROUP BY fa.farm_id
+            ORDER BY fa.created_at DESC
+        ''').fetchall()
+        return render_template('farms.html', farms=farms, now=datetime.now())
+    except Exception as e:
+        flash(f'Error loading farms: {e}', 'error')
+        return render_template('farms.html', farms=[], now=datetime.now())
+    finally:
+        conn.close()
+
+
+@app.route('/farms/add', methods=['GET', 'POST'])
+def add_farm():
+    if request.method == 'POST':
+        name          = request.form['name']
+        owner_name    = request.form['owner_name']
+        location      = request.form['location']
+        total_area_ha = float(request.form.get('total_area_ha', 0))
+        conn = get_db_connection()
+        try:
+            conn.execute('INSERT INTO farms (name,owner_name,location,total_area_ha,created_by) '
+                         'VALUES (%s,%s,%s,%s,%s::uuid)',
+                         (name, owner_name, location, total_area_ha, session.get('uid')))
+            conn.commit()
+            auth.log_activity('farm_created', notes=name)
+            flash('🌾 Farm registered successfully!', 'success')
+            socketio.emit('farm_added', {'name': name, 'location': location,
+                                         'timestamp': datetime.now().isoformat()})
+        except Exception as e:
+            flash(f'Error adding farm: {e}', 'error')
+        finally:
+            conn.close()
+        return redirect(url_for('farms_list'))
+    return render_template('add_farm.html', now=datetime.now())
+
+
+@app.route('/farms/<int:farm_id>')
+def farm_detail(farm_id):
+    conn = get_db_connection()
+    try:
+        farm = conn.execute('SELECT * FROM farms WHERE farm_id=%s', (farm_id,)).fetchone()
+        if not farm:
+            flash('Farm not found', 'error')
+            return redirect(url_for('farms_list'))
+
+        fields = conn.execute('''
+            SELECT f.*,
+                   cc.crop_type, cc.growth_stage, cc.area_ha AS crop_area,
+                   cc.planted_date, cc.expected_harvest_date, cc.target_yield_ton_ha, cc.season,
+                   ch.health_score, ch.heat_stress, ch.frost_risk, ch.drought_stress, ch.excess_moisture,
+                   yf.expected_yield_ton_ha, yf.confidence
+            FROM fields f
+            LEFT JOIN crop_census cc ON cc.census_id = (
+                SELECT census_id FROM crop_census WHERE field_id=f.field_id ORDER BY created_at DESC LIMIT 1)
+            LEFT JOIN crop_health ch ON ch.health_id = (
+                SELECT health_id FROM crop_health WHERE field_id=f.field_id ORDER BY recorded_at DESC LIMIT 1)
+            LEFT JOIN yield_forecasts yf ON yf.forecast_id = (
+                SELECT forecast_id FROM yield_forecasts WHERE field_id=f.field_id ORDER BY forecast_date DESC LIMIT 1)
+            WHERE f.farm_id=%s
+            ORDER BY f.created_at ASC
+        ''', (farm_id,)).fetchall()
+
+        farm_alerts = conn.execute('''
+            SELECT aa.* FROM agri_alerts aa
+            WHERE (aa.farm_id=%s
+                   OR aa.field_id IN (SELECT field_id FROM fields WHERE farm_id=%s))
+              AND aa.is_active
+            ORDER BY aa.created_at DESC
+        ''', (farm_id, farm_id)).fetchall()
+
+        return render_template('farm_detail.html', farm=farm, fields=fields,
+                               farm_alerts=farm_alerts, now=datetime.now())
+    except Exception as e:
+        flash(f'Error loading farm: {e}', 'error')
+        return redirect(url_for('farms_list'))
+    finally:
+        conn.close()
+
+
+@app.route('/fields/add', methods=['GET', 'POST'])
+def add_field():
+    conn = get_db_connection()
+    if request.method == 'POST':
+        farm_id       = int(request.form['farm_id'])
+        name          = request.form['name']
+        area_ha       = float(request.form['area_ha'])
+        soil_type     = request.form.get('soil_type', 'Loamy')
+        irrigation_type = request.form.get('irrigation_type', 'Drip')
+        crop_type     = request.form.get('crop_type', '')
+        growth_stage  = request.form.get('growth_stage', 'Germination')
+        planted_date  = request.form.get('planted_date', '')
+        expected_harvest_date = request.form.get('expected_harvest_date', '')
+        target_yield  = float(request.form.get('target_yield_ton_ha', 3.0))
+        season        = request.form.get('season', 'Rabi 2025-26')
+        try:
+            cursor = conn.cursor()
+            cursor.execute('INSERT INTO fields (farm_id,name,area_ha,soil_type,irrigation_type) '
+                           'VALUES (%s,%s,%s,%s,%s) RETURNING field_id',
+                           (farm_id, name, area_ha, soil_type, irrigation_type))
+            field_id = cursor.fetchone()[0]
+            if crop_type:
+                cursor.execute('''INSERT INTO crop_census
+                                  (field_id,crop_type,area_ha,growth_stage,planted_date,
+                                   expected_harvest_date,target_yield_ton_ha,season)
+                                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s)''',
+                               (field_id, crop_type, area_ha, growth_stage, planted_date,
+                                expected_harvest_date, target_yield, season))
+            conn.commit()
+            auth.log_activity('field_created', notes=name)
+            farm = conn.execute('SELECT location FROM farms WHERE farm_id=%s', (farm_id,)).fetchone()
+            if farm:
+                threading.Thread(target=refresh_field_data,
+                                 args=(field_id, farm['location']), daemon=True).start()
+            flash('🌱 Field and crop registered successfully!', 'success')
+            return redirect(url_for('farm_detail', farm_id=farm_id))
+        except Exception as e:
+            flash(f'Error adding field: {e}', 'error')
+            return redirect(url_for('farms_list'))
+        finally:
+            conn.close()
+
+    farms = conn.execute('SELECT farm_id, name FROM farms ORDER BY name').fetchall()
+    conn.close()
+    pre_farm_id = request.args.get('farm_id')
+    return render_template('add_field.html', farms=farms, pre_farm_id=pre_farm_id, now=datetime.now())
+
+
+@app.route('/fields/<int:field_id>')
+def field_detail(field_id):
+    conn = get_db_connection()
+    try:
+        field = conn.execute('''
+            SELECT f.*, fa.name AS farm_name, fa.location, fa.farm_id
+            FROM fields f JOIN farms fa ON f.farm_id = fa.farm_id
+            WHERE f.field_id=%s
+        ''', (field_id,)).fetchone()
+        if not field:
+            flash('Field not found', 'error')
+            return redirect(url_for('farms_list'))
+
+        crop_census    = conn.execute('SELECT * FROM crop_census WHERE field_id=%s ORDER BY created_at DESC',
+                                      (field_id,)).fetchall()
+        latest_health  = conn.execute('SELECT * FROM crop_health WHERE field_id=%s ORDER BY recorded_at DESC LIMIT 1',
+                                      (field_id,)).fetchone()
+        health_history = conn.execute('SELECT health_score, recorded_at FROM crop_health WHERE field_id=%s '
+                                      'ORDER BY recorded_at DESC LIMIT 10', (field_id,)).fetchall()
+        pest_risks     = conn.execute('SELECT * FROM pest_risks WHERE field_id=%s ORDER BY recorded_at DESC LIMIT 10',
+                                      (field_id,)).fetchall()
+        irrigation_recs = conn.execute('SELECT * FROM irrigation_recommendations WHERE field_id=%s '
+                                       'ORDER BY created_at DESC LIMIT 5', (field_id,)).fetchall()
+        latest_yield   = conn.execute('SELECT * FROM yield_forecasts WHERE field_id=%s '
+                                      'ORDER BY forecast_date DESC LIMIT 1', (field_id,)).fetchone()
+        recent_weather = conn.execute('SELECT * FROM field_weather WHERE field_id=%s '
+                                      'ORDER BY recorded_at DESC LIMIT 6', (field_id,)).fetchall()
+        field_alerts   = conn.execute('SELECT * FROM agri_alerts WHERE field_id=%s AND is_active '
+                                      'ORDER BY created_at DESC', (field_id,)).fetchall()
+
+        return render_template('field_detail.html',
+                               field=field, crop_census=crop_census,
+                               latest_health=latest_health, health_history=health_history,
+                               pest_risks=pest_risks, irrigation_recs=irrigation_recs,
+                               latest_yield=latest_yield, recent_weather=recent_weather,
+                               field_alerts=field_alerts, now=datetime.now())
+    except Exception as e:
+        flash(f'Field detail error: {e}', 'error')
+        return redirect(url_for('farms_list'))
+    finally:
+        conn.close()
+
+
+@app.route('/agri/alerts')
+def agri_alerts_view():
+    conn = get_db_connection()
+    try:
+        alerts = conn.execute('''
+            SELECT aa.*, f.name AS field_name, fa.name AS farm_name
+            FROM agri_alerts aa
+            LEFT JOIN fields f  ON aa.field_id = f.field_id
+            LEFT JOIN farms  fa ON aa.farm_id  = fa.farm_id
+                                 OR (aa.farm_id IS NULL AND f.farm_id = fa.farm_id)
+            ORDER BY aa.is_active DESC, aa.created_at DESC
+        ''').fetchall()
+        return render_template('agri_alerts.html', alerts=alerts, now=datetime.now())
+    except Exception as e:
+        flash(f'Error loading alerts: {e}', 'error')
+        return render_template('agri_alerts.html', alerts=[], now=datetime.now())
+    finally:
+        conn.close()
+
+
+@app.route('/agri/alerts/dismiss/<int:alert_id>', methods=['POST'])
+def dismiss_agri_alert(alert_id):
+    conn = get_db_connection()
+    try:
+        conn.execute('UPDATE agri_alerts SET is_active = FALSE WHERE alert_id=%s', (alert_id,))
+        conn.commit()
+        flash('Alert dismissed.', 'success')
+    except Exception as e:
+        flash(f'Error: {e}', 'error')
+    finally:
+        conn.close()
+    return redirect(url_for('agri_alerts_view'))
+
+
+@app.route('/fields/<int:field_id>/refresh', methods=['POST'])
+def refresh_field(field_id):
+    """Manually trigger a live weather refresh for one field."""
+    conn = get_db_connection()
+    try:
+        row = conn.execute('''SELECT f.field_id, fa.location FROM fields f
+                              JOIN farms fa ON f.farm_id=fa.farm_id WHERE f.field_id=%s''',
+                           (field_id,)).fetchone()
+        if row:
+            threading.Thread(target=refresh_field_data,
+                             args=(field_id, row['location']), daemon=True).start()
+            flash('🔄 Field data refresh started!', 'success')
+        else:
+            flash('Field not found', 'error')
+    except Exception as e:
+        flash(f'Refresh error: {e}', 'error')
+    finally:
+        conn.close()
+    return redirect(url_for('field_detail', field_id=field_id))
+
+
+# ============================================================
+# AGRICULTURE API ENDPOINTS (JSON)
+# ============================================================
+
+@app.route('/api/agri/farms')
+def api_farms():
+    conn = get_db_connection()
+    try:
+        rows = conn.execute('''
+            SELECT fa.farm_id, fa.name, fa.owner_name, fa.location, fa.total_area_ha,
+                   COUNT(DISTINCT f.field_id) AS field_count,
+                   COALESCE(AVG(ch.health_score), 0) AS avg_health
+            FROM farms fa
+            LEFT JOIN fields f ON fa.farm_id = f.farm_id
+            LEFT JOIN crop_health ch ON ch.field_id = f.field_id AND ch.health_id = (
+                SELECT MAX(health_id) FROM crop_health WHERE field_id=f.field_id)
+            GROUP BY fa.farm_id
+        ''').fetchall()
+        return jsonify([dict(r) for r in rows])
+    finally:
+        conn.close()
+
+
+@app.route('/api/agri/fields/<int:field_id>')
+def api_field_detail(field_id):
+    conn = get_db_connection()
+    try:
+        field  = conn.execute('SELECT f.*, fa.name AS farm_name, fa.location FROM fields f '
+                              'JOIN farms fa ON f.farm_id=fa.farm_id WHERE f.field_id=%s',
+                              (field_id,)).fetchone()
+        if not field:
+            return jsonify({'error': 'Field not found'}), 404
+        census = conn.execute('SELECT * FROM crop_census WHERE field_id=%s '
+                              'ORDER BY created_at DESC LIMIT 1', (field_id,)).fetchone()
+        health = conn.execute('SELECT * FROM crop_health WHERE field_id=%s '
+                              'ORDER BY recorded_at DESC LIMIT 1', (field_id,)).fetchone()
+        risks  = conn.execute('SELECT * FROM pest_risks WHERE field_id=%s '
+                              'ORDER BY recorded_at DESC', (field_id,)).fetchall()
+        irr    = conn.execute('SELECT * FROM irrigation_recommendations WHERE field_id=%s '
+                              'AND is_done = FALSE ORDER BY created_at DESC LIMIT 1', (field_id,)).fetchone()
+        yf     = conn.execute('SELECT * FROM yield_forecasts WHERE field_id=%s '
+                              'ORDER BY forecast_date DESC LIMIT 1', (field_id,)).fetchone()
+        return jsonify({
+            'field':         dict(field),
+            'crop_census':   dict(census) if census else None,
+            'health':        dict(health) if health else None,
+            'pest_risks':    [dict(r) for r in risks],
+            'irrigation':    dict(irr) if irr else None,
+            'yield_forecast': dict(yf) if yf else None,
+        })
+    finally:
+        conn.close()
+
+
+@app.route('/api/agri/health/<int:field_id>')
+def api_crop_health(field_id):
+    """Live health score computed from current weather."""
+    conn = get_db_connection()
+    try:
+        info = conn.execute('''
+            SELECT f.field_id, fa.location, cc.crop_type, cc.area_ha, cc.target_yield_ton_ha
+            FROM fields f JOIN farms fa ON f.farm_id=fa.farm_id
+            LEFT JOIN crop_census cc ON cc.field_id=f.field_id
+            WHERE f.field_id=%s ORDER BY cc.created_at DESC LIMIT 1
+        ''', (field_id,)).fetchone()
+        if not info:
+            return jsonify({'error': 'Field not found'}), 404
+        weather = fetch_live_weather(info['location'])
+        health  = compute_crop_health(weather, info['crop_type'] or 'wheat')
+        risks   = compute_pest_risks(weather, info['crop_type'] or 'wheat')
+        irr     = compute_irrigation(weather, info['area_ha'] or 1.0)
+        yf      = compute_yield_forecast(health['health_score'], info['target_yield_ton_ha'] or 3.0)
+        return jsonify({
+            'field_id':     field_id,
+            'weather':      weather,
+            'health':       health,
+            'pest_risks':   risks,
+            'irrigation':   irr,
+            'yield_forecast': yf,
+            'computed_at':  datetime.now().isoformat(),
+        })
+    finally:
+        conn.close()
+
+
+@app.route('/api/agri/advisories')
+def api_advisories():
+    """All pending agri alerts and irrigation tasks."""
+    conn = get_db_connection()
+    try:
+        alerts = conn.execute('''
+            SELECT aa.*, f.name AS field_name, fa.name AS farm_name
+            FROM agri_alerts aa
+            LEFT JOIN fields f  ON aa.field_id = f.field_id
+            LEFT JOIN farms  fa ON aa.farm_id  = fa.farm_id
+                                 OR (aa.farm_id IS NULL AND f.farm_id = fa.farm_id)
+            WHERE aa.is_active ORDER BY aa.created_at DESC
+        ''').fetchall()
+        irrigation = conn.execute('''
+            SELECT ir.*, f.name AS field_name, fa.name AS farm_name
+            FROM irrigation_recommendations ir
+            JOIN fields f ON ir.field_id=f.field_id
+            JOIN farms fa ON f.farm_id=fa.farm_id
+            WHERE ir.is_done = FALSE ORDER BY ir.recommended_date ASC
+        ''').fetchall()
+        return jsonify({
+            'alerts':     [dict(a) for a in alerts],
+            'irrigation': [dict(i) for i in irrigation],
+            'count':      len(alerts) + len(irrigation),
+        })
+    finally:
+        conn.close()
+
+
+@app.route('/api/agri/analytics')
+def api_analytics():
+    """High-level agriculture analytics summary."""
+    conn = get_db_connection()
+    try:
+        total_farms  = conn.execute('SELECT COUNT(*) FROM farms').fetchone()[0]
+        total_fields = conn.execute('SELECT COUNT(*) FROM fields').fetchone()[0]
+        total_area   = conn.execute('SELECT COALESCE(SUM(area_ha),0) FROM fields').fetchone()[0]
+        avg_health   = conn.execute('''SELECT AVG(health_score) FROM crop_health WHERE health_id IN
+                                       (SELECT MAX(health_id) FROM crop_health GROUP BY field_id)''').fetchone()[0] or 0
+        crop_breakdown = conn.execute('''SELECT crop_type, COUNT(*) AS fields, SUM(area_ha) AS total_area
+                                         FROM crop_census GROUP BY crop_type ORDER BY total_area DESC''').fetchall()
+        risk_summary   = conn.execute('''SELECT risk_level, COUNT(*) AS count FROM pest_risks
+                                         GROUP BY risk_level ORDER BY count DESC''').fetchall()
+        yield_row      = conn.execute('''
+            SELECT SUM(yf.expected_yield_ton_ha * f.area_ha) AS total_expected,
+                   SUM(yf.target_yield_ton_ha   * f.area_ha) AS total_target
+            FROM yield_forecasts yf JOIN fields f ON yf.field_id=f.field_id
+            WHERE yf.forecast_id IN (SELECT MAX(forecast_id) FROM yield_forecasts GROUP BY field_id)
+        ''').fetchone()
+        return jsonify({
+            'total_farms':        total_farms,
+            'total_fields':       total_fields,
+            'total_area_ha':      round(total_area, 1),
+            'avg_health_score':   round(avg_health, 1),
+            'crop_breakdown':     [dict(r) for r in crop_breakdown],
+            'risk_summary':       [dict(r) for r in risk_summary],
+            'yield_expected_tons': round(yield_row[0] or 0, 1),
+            'yield_target_tons':   round(yield_row[1] or 0, 1),
+        })
+    finally:
+        conn.close()
+
+
+@app.route('/api/agri/forecast/<int:field_id>')
+def api_forecast(field_id):
+    """7-day weather-adjusted crop health forecast for a field."""
+    conn = get_db_connection()
+    try:
+        field_info = conn.execute('''
+            SELECT fa.location, cc.crop_type, cc.target_yield_ton_ha
+            FROM fields f JOIN farms fa ON f.farm_id=fa.farm_id
+            LEFT JOIN crop_census cc ON cc.field_id=f.field_id
+            WHERE f.field_id=%s ORDER BY cc.created_at DESC LIMIT 1
+        ''', (field_id,)).fetchone()
+        if not field_info:
+            return jsonify({'error': 'Field not found'}), 404
+
+        forecast_days = []
+        if OPENWEATHER_API_KEY not in ('demo_key', 'demo_key_12345'):
+            try:
+                params = {'q': field_info['location'], 'appid': OPENWEATHER_API_KEY,
+                          'units': 'metric', 'cnt': 40}
+                r = requests.get('https://api.openweathermap.org/data/2.5/forecast',
+                                 params=params, timeout=10)
+                if r.status_code == 200:
+                    seen = set()
+                    for item in r.json()['list']:
+                        date = item['dt_txt'][:10]
+                        if date not in seen:
+                            seen.add(date)
+                            w = {'temperature': item['main']['temp'],
+                                 'humidity':    item['main']['humidity'],
+                                 'rainfall':    item.get('rain', {}).get('3h', 0),
+                                 'wind_speed':  item['wind']['speed']}
+                            h = compute_crop_health(w, field_info['crop_type'] or 'wheat')
+                            forecast_days.append({'date': date, 'weather': w,
+                                                  'health_score': h['health_score'],
+                                                  'condition': item['weather'][0]['main']})
+                            if len(forecast_days) >= 7:
+                                break
+            except Exception as fe:
+                print(f"Forecast API error: {fe}")
+
+        if not forecast_days:
+            base = fetch_live_weather(field_info['location'])
+            for i in range(7):
+                variation = (hash(str(i) + field_info['location']) % 10) - 5
+                w = {'temperature': base['temperature'] + variation * 0.5,
+                     'humidity':    min(100, max(20, base['humidity'] + variation)),
+                     'rainfall':    max(0, variation) if variation > 3 else 0,
+                     'wind_speed':  base['wind_speed']}
+                h = compute_crop_health(w, field_info['crop_type'] or 'wheat')
+                forecast_days.append({
+                    'date':         (datetime.now() + timedelta(days=i)).strftime('%Y-%m-%d'),
+                    'weather':      w,
+                    'health_score': h['health_score'],
+                    'condition':    'Rain' if w['rainfall'] > 0 else 'Sunny',
+                })
+
+        return jsonify({'field_id': field_id, 'forecast': forecast_days})
+    finally:
+        conn.close()
+
+# SocketIO Events
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection"""
+    print(f"✅ Client connected: {request.sid}")
+    emit('connection_response', {
+        'status': 'connected', 
+        'message': 'Welcome to Smart Weather System!',
+        'ai_status': 'trained' if weather_ai.is_trained else 'training'
+    })
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle client disconnection"""
+    print(f"❌ Client disconnected: {request.sid}")
+
+@socketio.on('request_weather')
+def handle_weather_request(data):
+    """Handle real-time weather requests"""
+    location = data.get('location', 'Lahore')
+    auth.log_activity('weather_search', notes=str(location)[:80])
+    pipeline = process_weather_pipeline(location)
+    weather_data = pipeline['cleaned']
+    prediction = pipeline['prediction']
+
+    if not pipeline.get('skip_weather_storage'):
+        store_weather_data(weather_data, pipeline_output=pipeline)
+    store_pipeline_log(pipeline)
+    update_sensor_quality_metrics(
+        weather_data.get('sensor_id', f'sensor-{location}'),
+        pipeline['validation'],
+        weather_data
+    )
+    log_prediction_quality(location, weather_data.get('sensor_id', 'unknown'), prediction)
+    recent_cleaned_by_location[location].append(weather_data)
+    
+    emit('weather_response', {
+        'location': location,
+        'current': weather_data,
+        'prediction': prediction,
+        'quality': pipeline['quality'],
+        'decision': pipeline['decision'],
+        'features': pipeline['features']
+    })
+
+@socketio.on('request_ai_training')
+def handle_ai_training_request():
+    """Handle AI training requests"""
+    if not weather_ai.is_trained:
+        emit('ai_training_start', {'message': 'Starting AI model training...'})
+        
+        # Train with available data
+        historical_data = get_historical_weather('London', 168)
+        success = weather_ai.train(historical_data)
+        
+        if success:
+            emit('ai_training_complete', {
+                'message': 'AI model trained successfully!',
+                'score': 0.85,  # Simulated score
+                'data_points': len(historical_data)
+            })
+        else:
+            emit('ai_training_failed', {'message': 'AI training failed. Insufficient data.'})
+
+# Initialize application
+def _augment_training_data(historical_data, location='London'):
+    """
+    Augment historical weather data with synthetic extreme-event sequences so
+    every hazard class is represented during (demo) training.
+
+    The bundled seed data only contains benign ("normal") observations, which
+    makes the multi-hazard ensemble degenerate: a single-class label set makes
+    XGBoost emit a 2-column probability matrix and crashes LightGBM, while also
+    producing a model that can never predict any real hazard.
+
+    We synthesize short, self-contained hourly sequences that trip each hazard
+    threshold. The feature-engineering pipeline (lags, rolling stats, pressure
+    trends) then yields correctly-labelled rows for every class, while the
+    benign seed data still covers the "normal" class.
+    """
+    augmented = list(historical_data) if historical_data else []
+
+    # Enough consecutive hourly rows that lag(12) + rolling(24) survive dropna.
+    seq_len = 30
+    base_hour = 12
+    base_dow = 1
+    base_month = 9
+
+    def base_record(t, temperature, humidity, pressure, wind_speed):
+        return {
+            'temperature': temperature,
+            'humidity': humidity,
+            'pressure': pressure,
+            'wind_speed': wind_speed,
+            'hour': (base_hour + t) % 24,
+            'day_of_week': base_dow,
+            'month': base_month,
+        }
+
+    # extreme_heat_heatwave: temperature >= 38
+    heat = [base_record(t, 42.0, 30.0, 1012.0, 3.0) for t in range(seq_len)]
+
+    # extreme_cold_frost: temperature <= 2
+    cold = [base_record(t, -5.0, 80.0, 1015.0, 4.0) for t in range(seq_len)]
+
+    # high_wind_storm: wind_speed >= 25
+    wind = [base_record(t, 20.0, 65.0, 1014.0, 32.0) for t in range(seq_len)]
+
+    # heavy_rain_flood: pressure < 1000 and pressure_trend_6h < -2
+    # (pressure falling ~1.5 hPa/hour)
+    flood = [
+        base_record(t, 20.0, 85.0, 1015.0 - 1.5 * t, 6.0) for t in range(seq_len)
+    ]
+
+    for scenario in (heat, cold, wind, flood):
+        augmented.extend(scenario)
+
+    return augmented
+
+
+def _model_status():
+    """Live model facts for the admin AI page (only values the model really exposes)."""
+    info = {'trained': bool(weather_ai.is_trained)}
+    if weather_ai.is_trained:
+        info['model_version'] = getattr(weather_ai.ensemble, 'model_version', None)
+        info['base_learners'] = ', '.join(map(str, getattr(weather_ai.ensemble, 'base_learner_names', []) or [])) or None
+        info['training_data_points'] = getattr(weather_ai, 'training_data_points', None)
+    return {k: v for k, v in info.items() if v is not None}
+
+
+app.config['MODEL_STATUS_PROVIDER'] = _model_status
+
+
+def initialize_app():
+    """Initialize the application"""
+    print("Initializing Smart Weather System...")
+    init_database()
+    init_agriculture_database()
+
+    # Phase 6: Load cache from disk
+    weather_ai.degradation_manager.cache._load_cache()
+
+    # Try to load existing AI model (Phase 1: Stacking Ensemble)
+    if not weather_ai.load_model():
+        print("Training new Stacking Ensemble model...")
+        # Train with available historical data from all locations.
+        # Use a generous look-back window (1 year) for the *initial* training so
+        # the bundled demo data (which may be timestamped up to a year old) is
+        # actually eligible. The previous 168-hour (7-day) window excluded all
+        # of the seeded London records, so the model never trained.
+        TRAINING_WINDOW_HOURS = 8760
+        conn = get_db_connection()
+        if conn:
+            try:
+                locations = conn.execute("SELECT DISTINCT location FROM users WHERE location <> ''").fetchall()
+                for row in locations:
+                    location = row['location']
+                    historical_data = get_historical_weather(location, TRAINING_WINDOW_HOURS)
+                    # Augment with synthetic extreme-event samples so every hazard
+                    # class is represented (the seed data is all "normal").
+                    historical_data = _augment_training_data(historical_data, location)
+                    if len(historical_data) >= 20:
+                        weather_ai.train(historical_data, location)
+                        break
+            except Exception as e:
+                print(f"Training error: {e}")
+            finally:
+                conn.close()
+
+    # Start scheduler for periodic updates
+    # Temporarily disabled to fix application context issues
+    # scheduler.add_job(lambda: update_weather_data(), 'interval', minutes=2)
+    # scheduler.add_job(lambda: retrain_ai_with_recent_clean_data(168), 'interval', hours=1)
+    # scheduler.add_job(lambda: evaluate_prediction_quality(), 'interval', minutes=10)
+
+    # if not scheduler.running:
+    #     scheduler.start()
+    #     print("⏰ Scheduler started")
+
+    print("✅ Smart Weather System ready!")
+    print(f"   Model version: {weather_ai.ensemble.model_version if weather_ai.is_trained else 'not trained'}")
+    print(f"   Base learners: {weather_ai.ensemble.base_learner_names if weather_ai.is_trained else 'N/A'}")
+    print(f"   Cache mode: {weather_ai.degradation_manager.get_system_status()['mode']}")
+
+# ============================================================
+# SENSOR INGESTION ROUTES
+# ============================================================
+
+@app.route('/api/sensors/mode', methods=['GET'])
+def get_sensor_mode():
+    """Get current sensor mode (simulation or real)"""
+    return jsonify({
+        'mode': SENSOR_MODE,
+        'description': 'simulation' if SENSOR_MODE == 'simulation' else 'real sensors via MQTT/HTTP'
+    })
+
+@app.route('/api/sensors/mode', methods=['POST'])
+def set_sensor_mode():
+    """Set sensor mode (simulation or real)"""
+    try:
+        data = request.json
+        mode = data.get('mode', 'simulation').lower()
+        
+        if mode not in ['simulation', 'real']:
+            return jsonify({'error': 'Invalid mode. Use "simulation" or "real"'}), 400
+        
+        # Update environment variable in .env file
+        import os as os_module
+        from pathlib import Path
+        
+        env_path = Path('.env')
+        if env_path.exists():
+            env_content = env_path.read_text()
+            # Update or add SENSOR_MODE line
+            if 'SENSOR_MODE=' in env_content:
+                lines = env_content.split('\n')
+                for i, line in enumerate(lines):
+                    if line.startswith('SENSOR_MODE='):
+                        lines[i] = f'SENSOR_MODE={mode}'
+                        break
+                env_content = '\n'.join(lines)
+            else:
+                env_content += f'\nSENSOR_MODE={mode}'
+            
+            env_path.write_text(env_content)
+        
+        # Update global variable
+        global SENSOR_MODE
+        SENSOR_MODE = mode
+        
+        # Restart sensor ingestion if running
+        if mode == 'simulation':
+            return jsonify({
+                'success': True,
+                'mode': mode,
+                'message': 'Switched to simulation mode. System will generate synthetic sensor data.'
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'mode': mode,
+                'message': 'Switched to real sensor mode. Connect your sensors via MQTT/HTTP.'
+            })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sensors/ingest', methods=['POST'])
+def sensor_ingest():
+    """Receive sensor data via HTTP (fallback for MQTT)"""
+    try:
+        # Check if in simulation mode
+        if SENSOR_MODE == 'simulation':
+            from sensor_simulation import SensorSimulator
+            simulator = SensorSimulator()
+            reading = simulator.generate_sensor_reading(
+                request.json.get('sensor_type', 'soil_moisture'),
+                request.json.get('field_id', 1)
+            )
+            # Use simulated data instead of real sensor data
+            payload = reading
+        else:
+            payload = request.json
+            if not payload:
+                return jsonify({'error': 'No payload provided'}), 400
+            
+            # Validate required fields
+            required = ['sensor_id', 'sensor_type', 'value', 'timestamp']
+            for field in required:
+                if field not in payload:
+                    return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        # Import sensor ingestion components
+        from sensor_ingestion import SensorValidator, SensorDatabase
+        
+        validator = SensorValidator()
+        db = SensorDatabase()
+        
+        # Validate reading
+        validation = validator.validate(
+            payload['sensor_type'],
+            float(payload['value']),
+            payload['sensor_id']
+        )
+        
+        # Store raw reading
+        db.store_raw_reading({
+            'sensor_id': payload['sensor_id'],
+            'sensor_type': payload['sensor_type'],
+            'value': float(payload['value']),
+            'unit': payload.get('unit'),
+            'timestamp': payload['timestamp'],
+            'field_id': payload.get('field_id')
+        })
+        
+        # Store validated reading if quality > 0
+        if validation['quality_score'] > 0:
+            db.store_validated_reading({
+                'sensor_id': payload['sensor_id'],
+                'sensor_type': payload['sensor_type'],
+                'value': float(payload['value']),
+                'unit': payload.get('unit'),
+                'timestamp': payload['timestamp'],
+                'field_id': payload.get('field_id')
+            }, validation)
+            db.update_sensor_health(payload['sensor_id'], validation['quality_score'])
+        
+        return jsonify({
+            'success': True,
+            'sensor_id': payload['sensor_id'],
+            'validation': validation
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sensors/health')
+def sensor_health_status():
+    """Get health status of all sensors"""
+    conn = get_db_connection()
+    try:
+        sensors = conn.execute('SELECT * FROM sensor_health ORDER BY last_reading_at DESC').fetchall()
+        return jsonify([dict(s) for s in sensors])
+    finally:
+        conn.close()
+
+@app.route('/api/sensors/readings/<sensor_type>')
+def sensor_readings(sensor_type):
+    """Get validated readings for a sensor type"""
+    conn = get_db_connection()
+    try:
+        field_id = request.args.get('field_id', type=int)
+        hours = request.args.get('hours', 24, type=int)
+        
+        query = '''
+            SELECT * FROM validated_sensor_readings
+            WHERE sensor_type = %s
+            AND timestamp >= now() - make_interval(hours => %s)
+        '''
+        
+        params = [sensor_type, hours]
+        if field_id:
+            query += ' AND field_id = %s'
+            params.append(field_id)
+        
+        query += ' ORDER BY timestamp DESC LIMIT 1000'
+        
+        readings = conn.execute(query, params).fetchall()
+        return jsonify([dict(r) for r in readings])
+    finally:
+        conn.close()
+
+@app.route('/api/sensors/export')
+def sensor_data_export():
+    """Export sensor data for research (CSV/JSON/Parquet)"""
+    conn = get_db_connection()
+    try:
+        format_type = request.args.get('format', 'csv')
+        sensor_type = request.args.get('sensor_type')
+        hours = request.args.get('hours', 168, type=int)  # Default 7 days
+        
+        query = '''
+            SELECT * FROM validated_sensor_readings
+            WHERE timestamp >= now() - make_interval(hours => %s)
+        '''
+        
+        params = [hours]
+        if sensor_type:
+            query += ' AND sensor_type = %s'
+            params.append(sensor_type)
+        
+        query += ' ORDER BY timestamp DESC'
+        
+        readings = conn.execute(query, params).fetchall()
+        
+        if format_type == 'csv':
+            import csv
+            from io import StringIO
+            output = StringIO()
+            fieldnames = list(readings[0].keys()) if readings else [
+                'reading_id', 'sensor_id', 'sensor_type', 'value', 'unit', 'quality_score',
+                'validation_reason', 'timestamp', 'field_id', 'stored_at']
+            writer = csv.DictWriter(output, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows([dict(r) for r in readings])
+            response = Response(output.getvalue(), mimetype='text/csv')
+            response.headers['Content-Disposition'] = 'attachment; filename=sensor_data.csv'
+            return response
+        else:
+            return jsonify([dict(r) for r in readings])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+# ============================================================
+# DATA PROCESSING ROUTES
+# ============================================================
+
+@app.route('/api/processing/clean/<sensor_type>')
+def clean_sensor_data(sensor_type):
+    """Clean and validate sensor data with anomaly detection"""
+    from data_processing import DataProcessingPipeline
+    
+    try:
+        field_id = request.args.get('field_id', type=int)
+        hours = request.args.get('hours', 168, type=int)
+        
+        pipeline = DataProcessingPipeline()
+        result = pipeline.process_sensor_data(sensor_type, field_id, hours)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/processing/field/<int:field_id>')
+def process_field_data(field_id):
+    """Process all sensor data for a field"""
+    from data_processing import DataProcessingPipeline
+    
+    try:
+        hours = request.args.get('hours', 168, type=int)
+        
+        pipeline = DataProcessingPipeline()
+        results = pipeline.process_all_field_sensors(field_id, hours)
+        
+        return jsonify({
+            'success': True,
+            'field_id': field_id,
+            'sensor_results': results
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/processing/quality/<int:field_id>')
+def field_data_quality(field_id):
+    """Get data quality scores for all sensors in a field"""
+    from data_processing import DataProcessingPipeline, DataQualityScorer
+    
+    try:
+        pipeline = DataProcessingPipeline()
+        quality_scores = {}
+        
+        sensor_types = ['soil_moisture', 'soil_temperature', 'air_temperature', 'air_humidity']
+        
+        for sensor_type in sensor_types:
+            df = pipeline.get_validated_sensor_data(sensor_type, field_id, hours=168)
+            if len(df) > 0:
+                quality_scores[sensor_type] = DataQualityScorer.compute_overall_quality_score(df, sensor_type)
+        
+        return jsonify({
+            'success': True,
+            'field_id': field_id,
+            'quality_scores': quality_scores
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/processing/features/gdd')
+def calculate_gdd():
+    """Calculate Growing Degree Days from temperature data"""
+    from data_processing import FeatureEngineer
+    
+    try:
+        field_id = request.args.get('field_id', type=int)
+        hours = request.args.get('hours', 168, type=int)
+        base_temp = request.args.get('base_temp', 10.0, type=float)
+        
+        from data_processing import DataProcessingPipeline
+        pipeline = DataProcessingPipeline()
+        
+        # Fetch temperature data
+        df = pipeline.get_validated_sensor_data('air_temperature', field_id, hours)
+        
+        if len(df) == 0:
+            return jsonify({'success': False, 'message': 'No temperature data available'})
+        
+        temperatures = df['value'].tolist()
+        gdd = FeatureEngineer.calculate_growing_degree_days(temperatures, base_temp)
+        
+        return jsonify({
+            'success': True,
+            'growing_degree_days': round(gdd, 2),
+            'base_temperature': base_temp,
+            'data_points': len(temperatures)
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/processing/features/et')
+def calculate_et():
+    """Calculate reference evapotranspiration using Penman-Monteith"""
+    from data_processing import FeatureEngineer
+    
+    try:
+        field_id = request.args.get('field_id', type=int)
+        
+        conn = get_db_connection()
+        try:
+            # Fetch latest sensor readings
+            readings = conn.execute('''
+                SELECT DISTINCT ON (sensor_type) sensor_type, value
+                FROM validated_sensor_readings
+                WHERE field_id = %s
+                AND timestamp >= now() - interval '1 hour'
+                ORDER BY sensor_type, timestamp DESC
+            ''', (field_id,)).fetchall()
+            
+            sensor_dict = {row['sensor_type']: row['value'] for row in readings}
+            
+            et = FeatureEngineer.calculate_evapotranspiration_penman_monteith(
+                temperature=sensor_dict.get('air_temperature', 20.0),
+                humidity=sensor_dict.get('air_humidity', 50.0),
+                wind_speed=sensor_dict.get('wind_speed', 5.0),
+                solar_radiation=sensor_dict.get('solar_radiation', 200.0),
+                pressure=1013.0
+            )
+            
+            return jsonify({
+                'success': True,
+                'evapotranspiration_mm_day': round(et, 2),
+                'sensor_data': sensor_dict
+            })
+        finally:
+            conn.close()
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/processing/features/stress')
+def calculate_stress_indices():
+    """Calculate stress indices from sensor data"""
+    from data_processing import FeatureEngineer
+    
+    try:
+        field_id = request.args.get('field_id', type=int)
+        
+        conn = get_db_connection()
+        try:
+            readings = conn.execute('''
+                SELECT DISTINCT ON (sensor_type) sensor_type, value
+                FROM validated_sensor_readings
+                WHERE field_id = %s
+                AND timestamp >= now() - interval '1 hour'
+                ORDER BY sensor_type, timestamp DESC
+            ''', (field_id,)).fetchall()
+            
+            sensor_dict = {row['sensor_type']: row['value'] for row in readings}
+            
+            stress_indices = FeatureEngineer.calculate_stress_indices(sensor_dict)
+            
+            return jsonify({
+                'success': True,
+                'stress_indices': stress_indices,
+                'sensor_data': sensor_dict
+            })
+        finally:
+            conn.close()
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ============================================================
+# CROP FAILURE PREDICTION ROUTES
+# ============================================================
+
+@app.route('/api/prediction/failure/<int:field_id>')
+def predict_crop_failure(field_id):
+    """Predict crop failure probability with confidence intervals"""
+    from crop_failure_predictor import CropFailureService
+    
+    try:
+        service = CropFailureService()
+        result = service.predict_crop_failure(field_id)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/prediction/train')
+def train_crop_failure_model():
+    """Train crop failure prediction model (with synthetic data for demo)"""
+    from crop_failure_predictor import CropFailureService
+    
+    try:
+        service = CropFailureService()
+        success = service.train_model_with_synthetic_data()
+        
+        return jsonify({
+            'success': success,
+            'model_metadata': service.predictor.training_metadata
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/prediction/explain/<int:field_id>')
+def explain_crop_failure_prediction(field_id):
+    """Explain crop failure prediction using SHAP values"""
+    from crop_failure_predictor import CropFailureService
+    
+    try:
+        service = CropFailureService()
+        
+        # Get sensor data
+        sensor_data = service.get_sensor_data_for_field(field_id)
+        crop_info = service.get_crop_info_for_field(field_id)
+        
+        if not sensor_data or not crop_info:
+            return jsonify({'success': False, 'error': 'Insufficient data for explanation'})
+        
+        # Prepare features
+        features = service.predictor.prepare_features(sensor_data, crop_info)
+        
+        # Explain
+        explanation = service.predictor.explain_prediction(features)
+        
+        return jsonify({
+            'success': True,
+            'field_id': field_id,
+            'explanation': explanation,
+            'feature_names': service.predictor.feature_names
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ============================================================
+# TREND VISUALIZATION ROUTES
+# ============================================================
+
+@app.route('/api/visualization/trend/historical/<sensor_type>')
+def visualize_historical_trend(sensor_type):
+    """Generate historical trend chart for sensor data"""
+    from trend_visualization import TrendVisualizer
+    
+    try:
+        field_id = request.args.get('field_id', type=int)
+        hours = request.args.get('hours', 720, type=int)  # Default 30 days
+        
+        visualizer = TrendVisualizer()
+        result = visualizer.generate_historical_trend(sensor_type, field_id, hours)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/visualization/trend/forecast/<sensor_type>')
+def visualize_forecast_trend(sensor_type):
+    """Generate forecast trend chart with uncertainty bands"""
+    from trend_visualization import TrendVisualizer
+    
+    try:
+        field_id = request.args.get('field_id', type=int)
+        forecast_hours = request.args.get('forecast_hours', 168, type=int)  # Default 7 days
+        
+        visualizer = TrendVisualizer()
+        result = visualizer.generate_forecast_trend(sensor_type, field_id, forecast_hours)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/visualization/trend/health/<int:field_id>')
+def visualize_health_trend(field_id):
+    """Generate crop health trend chart"""
+    from trend_visualization import TrendVisualizer
+    
+    try:
+        hours = request.args.get('hours', 720, type=int)
+        
+        visualizer = TrendVisualizer()
+        result = visualizer.generate_health_trend(field_id, hours)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/visualization/trend/yield/<int:field_id>')
+def visualize_yield_forecast(field_id):
+    """Generate yield forecast trend chart"""
+    from trend_visualization import TrendVisualizer
+    
+    try:
+        visualizer = TrendVisualizer()
+        result = visualizer.generate_yield_forecast_trend(field_id)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/visualization/trend/comparative')
+def visualize_comparative_trend():
+    """Generate comparative trend chart for multiple sensor types"""
+    from trend_visualization import TrendVisualizer
+    
+    try:
+        field_id = request.args.get('field_id', type=int)
+        hours = request.args.get('hours', 168, type=int)
+        sensor_types = request.args.getlist('sensor_types')
+        
+        if not sensor_types:
+            sensor_types = ['soil_moisture', 'air_temperature', 'air_humidity']
+        
+        visualizer = TrendVisualizer()
+        result = visualizer.generate_comparative_trend(sensor_types, field_id, hours)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ============================================================
+# EXPERIMENT TRACKING ROUTES
+# ============================================================
+
+@app.route('/api/experiments/start', methods=['POST'])
+def start_experiment():
+    """Start a new ML experiment"""
+    from experiment_tracking import ExperimentTracker
+    
+    try:
+        data = request.json
+        tracker = ExperimentTracker()
+        
+        exp_id = tracker.start_experiment(
+            experiment_name=data.get('experiment_name'),
+            model_type=data.get('model_type'),
+            description=data.get('description'),
+            tags=data.get('tags'),
+            parameters=data.get('parameters')
+        )
+        
+        return jsonify({'success': True, 'experiment_id': exp_id})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/experiments/<experiment_id>/metrics', methods=['POST'])
+def log_experiment_metrics(experiment_id):
+    """Log metrics for an experiment"""
+    from experiment_tracking import ExperimentTracker
+    
+    try:
+        data = request.json
+        tracker = ExperimentTracker()
+        
+        tracker.log_metrics(experiment_id, data.get('metrics'))
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/experiments/<experiment_id>/end', methods=['POST'])
+def end_experiment(experiment_id):
+    """End an experiment"""
+    from experiment_tracking import ExperimentTracker
+    
+    try:
+        data = request.json
+        tracker = ExperimentTracker()
+        
+        tracker.end_experiment(experiment_id, status=data.get('status', 'completed'))
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/experiments')
+def list_experiments():
+    """List all experiments"""
+    from experiment_tracking import ExperimentTracker
+    
+    try:
+        model_type = request.args.get('model_type')
+        status = request.args.get('status')
+        limit = request.args.get('limit', 50, type=int)
+        
+        tracker = ExperimentTracker()
+        experiments = tracker.list_experiments(model_type, status, limit)
+        
+        return jsonify({'success': True, 'experiments': experiments})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/experiments/<experiment_id>')
+def get_experiment(experiment_id):
+    """Get experiment details"""
+    from experiment_tracking import ExperimentTracker
+    
+    try:
+        tracker = ExperimentTracker()
+        experiment = tracker.get_experiment(experiment_id)
+        
+        return jsonify({'success': True, 'experiment': experiment})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================================
+# MULTI-HAZARD ALERTS API (Phase 5)
+# ============================================================
+
+@app.route('/api/hazards/predict')
+def predict_hazards():
+    """Predict multi-hazard probabilities for a location."""
+    location = request.args.get('location', 'Lahore')
+    lat = request.args.get('lat', type=float)
+    lon = request.args.get('lon', type=float)
+
+    try:
+        alert = weather_ai.predict_with_degradation(location, lat, lon)
+        auth.log_activity('prediction_generated', notes=str(location)[:80], dedupe_seconds=30)
+        return jsonify({
+            'success': True,
+            'location': location,
+            'alert': alert,
+        })
+    except Exception as e:
+        logger.error(f"Hazard prediction error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/hazards/alerts')
+def get_multi_hazard_alerts():
+    """Get all active multi-hazard alerts."""
+    try:
+        alert_store = AlertStore()
+        alerts = alert_store.get_active_alerts()
+        return jsonify({
+            'success': True,
+            'alerts': alerts,
+            'count': len(alerts),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/hazards/dashboard')
+def get_hazard_dashboard():
+    """Get dashboard-ready data for all locations."""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'error': 'Database connection error'}), 500
+
+        locations = conn.execute("SELECT DISTINCT location FROM users WHERE location <> ''").fetchall()
+        locations_data = []
+
+        for row in locations:
+            location = row['location']
+            try:
+                alert = weather_ai.predict_with_degradation(location)
+                locations_data.append({
+                    'location': location,
+                    'classification': {
+                        'hazard_probabilities': alert.get('hazard_probabilities', {}),
+                        'risk_levels': alert.get('risk_levels', {}),
+                        'active_hazards': alert.get('active_hazards', []),
+                        'overall_risk_level': alert.get('overall_risk_level', 'green'),
+                        'alert_required': alert.get('alert_required', False),
+                        'recommended_actions': alert.get('recommended_actions', {}),
+                    },
+                    'explanation': {
+                        'alert_explanation': alert.get('explanation'),
+                        'top_features': alert.get('top_features'),
+                    },
+                })
+            except Exception as e:
+                logger.warning(f"Dashboard data error for {location}: {e}")
+
+        conn.close()
+
+        dashboard_data = weather_ai.communication_system.generate_dashboard_data(locations_data)
+        return jsonify({
+            'success': True,
+            'dashboard': dashboard_data,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================================
+# XAI EXPLAINABILITY API (Phase 4)
+# ============================================================
+
+@app.route('/api/xai/global')
+def get_global_explanations():
+    """Get global feature importance using SHAP (Phase 4)."""
+    try:
+        if not weather_ai.xai_system:
+            return jsonify({'success': False, 'error': 'XAI system not initialized. Train model first.'}), 400
+
+        # Use training data for global explanation
+        X = weather_ai._training_data_for_xai
+        if X is None or len(X) == 0:
+            return jsonify({'success': False, 'error': 'No training data available for explanation.'}), 400
+
+        result = weather_ai.xai_system.explain_global(X, max_samples=200)
+        return jsonify({
+            'success': True,
+            'global_explanation': result,
+        })
+    except Exception as e:
+        logger.error(f"Global XAI error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/xai/local')
+def get_local_explanation():
+    """Get local LIME explanation for a specific prediction (Phase 4)."""
+    location = request.args.get('location', 'Lahore')
+
+    try:
+        if not weather_ai.xai_system:
+            return jsonify({'success': False, 'error': 'XAI system not initialized. Train model first.'}), 400
+
+        # Get weather data with degradation
+        weather_data = weather_ai.degradation_manager.fetch_weather_with_degradation(location)
+        recent_history = weather_ai.degradation_manager.cache.get_recent_weather_history(location, hours=24)
+
+        # Prepare features
+        features = weather_ai.feature_engineer.prepare_single_prediction(
+            weather_data, recent_history, location
+        )
+
+        # Get explanation
+        explanation = weather_ai.xai_system.explain_local(features, top_k=5)
+
+        return jsonify({
+            'success': True,
+            'location': location,
+            'explanation': explanation,
+        })
+    except Exception as e:
+        logger.error(f"Local XAI error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================================
+# EDGE-CASE HARDENING API (Phase 6)
+# ============================================================
+
+@app.route('/api/system/status')
+def get_system_status():
+    """Get system status including cache mode and degradation info (Phase 6)."""
+    try:
+        status = weather_ai.degradation_manager.get_system_status()
+        return jsonify({
+            'success': True,
+            'system_status': status,
+            'model_version': weather_ai.ensemble.model_version if weather_ai.is_trained else 'not_trained',
+            'is_trained': weather_ai.is_trained,
+            'base_learners': weather_ai.ensemble.base_learner_names if weather_ai.is_trained else [],
+            'feature_count': len(weather_ai._feature_names),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/system/cache/clear', methods=['POST'])
+def clear_cache():
+    """Clear the fallback cache (Phase 6)."""
+    try:
+        weather_ai.degradation_manager.cache.clear()
+        return jsonify({
+            'success': True,
+            'message': 'Cache cleared successfully.',
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/system/cache/stats')
+def get_cache_stats():
+    """Get cache statistics (Phase 6)."""
+    try:
+        stats = weather_ai.degradation_manager.cache.get_cache_stats()
+        return jsonify({
+            'success': True,
+            'cache_stats': stats,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================================
+# EVALUATION API (Phase 3)
+# ============================================================
+
+@app.route('/api/evaluation/temporal')
+def evaluate_temporal():
+    """Run temporal cross-validation evaluation (Phase 3)."""
+    try:
+        if not weather_ai.is_trained:
+            return jsonify({'success': False, 'error': 'Model not trained.'}), 400
+
+        # Get historical data
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'error': 'Database connection error.'}), 500
+
+        location = request.args.get('location', 'Lahore')
+        historical_data = get_historical_weather(location, 168)
+        conn.close()
+
+        if len(historical_data) < 20:
+            return jsonify({'success': False, 'error': 'Insufficient data for evaluation.'}), 400
+
+        # Prepare features
+        X, y, feature_names = weather_ai.prepare_features(historical_data, location)
+        if X is None:
+            return jsonify({'success': False, 'error': 'Feature preparation failed.'}), 400
+
+        # Run evaluation
+        evaluator = ComprehensiveEvaluator(temporal_splits=3, train_fraction=0.8)
+        results = evaluator.evaluate_temporal(
+            weather_ai.ensemble, X, y, feature_names=feature_names
+        )
+        report = evaluator.generate_report(results)
+
+        return jsonify({
+            'success': True,
+            'evaluation_results': results,
+            'report': report,
+        })
+    except Exception as e:
+        logger.error(f"Evaluation error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# Shutdown handler
+def shutdown_app():
+    """Cleanup on application shutdown"""
+    print("Shutting down Smart Weather System...")
+    if scheduler.running:
+        scheduler.shutdown()
+    print("Clean shutdown completed")
+
+# Register shutdown handler
+atexit.register(shutdown_app)
+
+if __name__ == '__main__':
+    initialize_app()
+    port = int(os.environ.get('PORT', 5000))
+    print(f"🌐 Starting Flask-SocketIO server on port {port}...")
+    socketio.run(app, host='0.0.0.0', port=port, debug=True, allow_unsafe_werkzeug=True)

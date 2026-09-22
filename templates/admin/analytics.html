@@ -1,0 +1,26 @@
+{% extends "admin/_layout.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div class="tabs-row mb-0">{% for d in [7, 14, 30, 60, 90] %}<a class="{{ 'active' if d == days }}" href="{{ url_for('admin.analytics', days=d) }}">{{ d }} days</a>{% endfor %}</div>
+  <small class="text-muted">Daily counts straight from the database (UTC days).</small>
+</div>
+<div class="row g-3">
+  {% for cid, ttl in [('users','Users registered'),('daily','Daily active users (users with recorded activity)'),('weather','Weather records'),('alerts','Alerts created'),('farms','Farms created'),('sensors','Sensor readings received'),('pred','Prediction evaluation')] %}
+  <div class="col-12 {{ 'col-xl-12' if cid == 'pred' else 'col-xl-6' }}"><div class="a-card"><div class="a-card-h">{{ ttl }}</div><div class="a-card-b"><div class="chart-box"><canvas id="c-{{ cid }}"></canvas></div></div></div></div>
+  {% endfor %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+var S = {{ series | tojson }};
+AdminUI.chart('c-users', 'bar', S.users.labels, [{ label: 'New users', data: S.users.values }]);
+AdminUI.chart('c-daily', 'line', S.daily_active.labels, [{ label: 'Active users', data: S.daily_active.values }]);
+AdminUI.chart('c-weather', 'line', S.weather.labels, [{ label: 'Weather records', data: S.weather.values }]);
+AdminUI.chart('c-alerts', 'bar', S.alerts.labels, [{ label: 'Alerts', data: S.alerts.values }]);
+AdminUI.chart('c-farms', 'bar', S.farms.labels, [{ label: 'Farms', data: S.farms.values }]);
+AdminUI.chart('c-sensors', 'line', S.sensors.labels, [{ label: 'Sensor readings', data: S.sensors.values }]);
+AdminUI.chart('c-pred', 'bar', S.predictions.labels, [{ label: 'Evaluated predictions', data: S.predictions.evaluated, yAxisID: 'y' },
+  { label: 'Avg abs error °C', data: S.predictions.avg_error, type: 'line', yAxisID: 'y1' }],
+  { scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false } } } });
+</script>
+{% endblock %}
