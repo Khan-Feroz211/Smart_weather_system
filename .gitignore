@@ -67,3 +67,8 @@ High_elevation_*.csv
 pak-rainfall-subnat-full.csv
 pakistan_flood_complete_dataset.csv
 gdacs_rss_information.csv
+
+# Temp/debug scripts and analysis dumps
+_check_compile.py
+_final_check.py
+_*.txt
