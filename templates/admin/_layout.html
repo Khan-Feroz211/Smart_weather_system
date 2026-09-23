@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <meta name="robots" content="noindex,nofollow">
+  <title>{% block page_title %}{{ title }}{% endblock %} · Smart Weather Admin</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/admin.css') }}" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script>document.documentElement.setAttribute('data-bs-theme', localStorage.getItem('theme') || 'light');</script>
+</head>
+<body class="admin">
+{% macro link(key, href, icon, label) -%}
+  <a class="nav-item-link {{ 'active' if active == key }}" href="{{ href }}"><i class="fa-solid {{ icon }}"></i>{{ label }}</a>
+{%- endmacro %}
+{% macro group(id, icon, label, keys) -%}
+  <button class="nav-group-toggle" data-bs-toggle="collapse" data-bs-target="#g-{{ id }}" aria-expanded="{{ 'true' if active in keys else 'false' }}">
+    <i class="fa-solid {{ icon }} ico"></i>{{ label }}<i class="fa-solid fa-chevron-right chev"></i></button>
+  <div class="collapse nav-sub {{ 'show' if active in keys }}" id="g-{{ id }}">{{ caller() }}</div>
+{%- endmacro %}
+<div class="admin-shell">
+  <aside class="admin-sidebar" aria-label="Admin navigation">
+    <a class="admin-brand" href="{{ url_for('admin.dashboard') }}">
+      <span class="logo"><i class="fa-solid fa-cloud-sun-rain"></i></span>
+      <span><strong>Smart Weather</strong><small>ADMIN</small></span></a>
+    {{ link('dashboard', url_for('admin.dashboard'), 'fa-chart-pie', 'Dashboard') }}
+    {% call group('users', 'fa-users', 'Users', ['users','users_active','activity']) %}
+      {{ link('users', url_for('admin.users'), 'fa-user-group', 'All Users') }}
+      {{ link('users_active', url_for('admin.users_active'), 'fa-circle-dot', 'Active Users') }}
+      {{ link('activity', url_for('admin.activity'), 'fa-clock-rotate-left', 'User Activity') }}
+    {% endcall %}
+    {% call group('weather', 'fa-cloud-sun', 'Weather', ['weather']) %}
+      {{ link('weather', url_for('admin.weather'), 'fa-database', 'Weather Data') }}
+      {{ link('weather-a', url_for('admin.weather') ~ '#charts', 'fa-chart-line', 'Analytics') }}
+    {% endcall %}
+    {% call group('alerts', 'fa-bell', 'Alerts', ['alerts']) %}
+      {{ link('alerts', url_for('admin.alerts', status='active'), 'fa-bell', 'Active Alerts') }}
+      {{ link('alerts-h', url_for('admin.alerts'), 'fa-clock-rotate-left', 'Alert History') }}
+    {% endcall %}
+    {% call group('agri', 'fa-tractor', 'Agriculture', ['farms','fields','crops','crop_health','yield']) %}
+      {{ link('farms', url_for('admin.farms'), 'fa-warehouse', 'Farms') }}
+      {{ link('fields', url_for('admin.fields'), 'fa-vector-square', 'Fields') }}
+      {{ link('crops', url_for('admin.crops'), 'fa-wheat-awn', 'Crops') }}
+      {{ link('crop_health', url_for('admin.crop_health'), 'fa-heart-pulse', 'Crop Health') }}
+      {{ link('yield', url_for('admin.yield_forecasts'), 'fa-chart-column', 'Yield Forecasts') }}
+    {% endcall %}
+    {% call group('sensors', 'fa-satellite-dish', 'Sensors', ['sensors']) %}
+      {{ link('sensors', url_for('admin.sensors'), 'fa-signal', 'Sensor Status') }}
+      {{ link('sensors-q', url_for('admin.sensors', tab='quality'), 'fa-star-half-stroke', 'Quality Metrics') }}
+      {{ link('sensors-l', url_for('admin.sensors', tab='logs'), 'fa-list-check', 'Pipeline Logs') }}
+    {% endcall %}
+    {% call group('ai', 'fa-robot', 'AI Monitoring', ['ai']) %}
+      {{ link('ai', url_for('admin.ai'), 'fa-bullseye', 'Prediction Quality') }}
+    {% endcall %}
+    {{ link('analytics', url_for('admin.analytics'), 'fa-chart-line', 'Analytics') }}
+    {{ link('settings', url_for('admin.settings'), 'fa-gear', 'Settings') }}
+    <form method="post" action="{{ url_for('admin.logout') }}" class="mt-2">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="nav-item-link" type="submit"><i class="fa-solid fa-right-from-bracket"></i>Logout</button>
+    </form>
+  </aside>
+
+  <div class="admin-main">
+    <header class="admin-topbar">
+      <button class="btn btn-sm btn-outline-secondary d-lg-none" data-sidebar-toggle aria-label="Menu"><i class="fa-solid fa-bars"></i></button>
+      <h1>{{ title }}</h1>
+      <div class="ms-auto d-flex align-items-center gap-2">
+        <a class="btn btn-sm btn-outline-secondary d-none d-sm-inline-flex" href="{{ url_for('dashboard') }}"><i class="fa-solid fa-arrow-up-right-from-square me-1"></i>View site</a>
+        <button class="btn btn-sm btn-outline-secondary" onclick="AdminUI.toggleTheme()" aria-label="Toggle theme"><i class="fa-solid fa-circle-half-stroke"></i></button>
+        <span class="small text-muted d-none d-md-inline"><i class="fa-solid fa-user-shield me-1"></i>{{ current_user.username if current_user else '' }}</span>
+      </div>
+    </header>
+    <main class="admin-content">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }} alert-dismissible fade show" role="alert">{{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
+        {% endfor %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+
+<div class="toast-container position-fixed top-0 end-0 p-3" id="toasts" style="z-index:2000"></div>
+<div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title"></h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body"></div>
+  <div class="modal-footer"><button class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-danger" data-ok>Confirm</button></div>
+</div></div></div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

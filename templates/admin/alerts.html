@@ -1,0 +1,37 @@
+{% extends "admin/_layout.html" %}
+{% from "admin/_macros.html" import stat_card, sev_pill, pager %}
+{% block content %}
+<div class="tabs-row">{% for t in tabs %}<a href="{{ t.url }}" class="{{ 'active' if t.active }}">{{ t.label }}</a>{% endfor %}</div>
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-3">{{ stat_card({'label':'Total Alerts','value':stats.total,'icon':'fa-bell','tone':'primary','kind':'num'}) }}</div>
+  <div class="col-6 col-lg-3">{{ stat_card({'label':'Active Alerts','value':stats.active,'icon':'fa-bolt','tone':'success','kind':'num'}) }}</div>
+  <div class="col-6 col-lg-3">{{ stat_card({'label':'Critical Alerts','value':stats.critical,'icon':'fa-circle-exclamation','tone':'danger','kind':'num','hint':'critical / high / red'}) }}</div>
+  <div class="col-6 col-lg-3">{{ stat_card({'label':'Warning Alerts','value':stats.warning,'icon':'fa-triangle-exclamation','tone':'warning','kind':'num','hint':'warning / medium / orange / yellow'}) }}</div>
+</div>
+<div class="a-card">
+  <div class="a-card-h filters"><form class="d-flex flex-wrap gap-2 w-100" method="get">
+    <input type="hidden" name="type" value="{{ kind }}">
+    <input class="form-control form-control-sm" style="max-width:240px" type="search" name="q" value="{{ values.get('q','') }}" placeholder="Search type or message…">
+    <select class="form-select form-select-sm" style="max-width:160px" name="status" aria-label="Status">
+      <option value="">All statuses</option><option value="active" {{ 'selected' if values.get('status') == 'active' }}>Active</option><option value="inactive" {{ 'selected' if values.get('status') == 'inactive' }}>Inactive</option></select>
+    <select class="form-select form-select-sm" style="max-width:160px" name="severity" aria-label="Severity">
+      <option value="">All severities</option><option value="critical" {{ 'selected' if values.get('severity') == 'critical' }}>Critical</option><option value="warning" {{ 'selected' if values.get('severity') == 'warning' }}>Warning</option></select>
+    <button class="btn btn-sm btn-primary">Filter</button><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.alerts', type=kind) }}">Reset</a>
+  </form></div>
+  <div class="a-card-b p-0">
+  {% if data.rows %}<div class="table-wrap"><table class="a-table">
+    <thead><tr><th>Type</th><th>Severity</th><th>{{ cfg.owner_label }}</th><th>Message</th><th>Created</th><th>Status</th><th class="text-end">Actions</th></tr></thead><tbody>
+    {% for a in data.rows %}<tr>
+      <td class="fw-semibold">{{ a.alert_type or '—' }}</td><td>{{ sev_pill(a.severity) }}</td><td>{{ a.owner }}</td>
+      <td style="max-width:420px">{{ a.message }}</td><td class="text-muted" title="{{ a.created_at }}">{{ a.when }}</td>
+      <td>{% if a.is_active %}<span class="pill green">Active</span>{% else %}<span class="pill gray">Inactive</span>{% endif %}</td>
+      <td class="text-end text-nowrap">
+        <button class="btn btn-sm btn-outline-{{ 'warning' if a.is_active else 'success' }}" data-action="post" data-url="{{ url_for('admin.api_alert_toggle', kind=kind, alert_id=a.id) }}"
+          title="{{ 'Deactivate' if a.is_active else 'Activate' }}"><i class="fa-solid fa-{{ 'toggle-on' if a.is_active else 'toggle-off' }}"></i></button>
+        <button class="btn btn-sm btn-outline-danger" {{ 'disabled' if a.is_active }} data-action="post" data-url="{{ url_for('admin.api_alert_delete', kind=kind, alert_id=a.id) }}"
+          data-title="Delete alert" data-confirm="Delete this alert permanently?" data-ok="Delete" title="{{ 'Deactivate first' if a.is_active else 'Delete' }}"><i class="fa-solid fa-trash"></i></button>
+      </td></tr>{% endfor %}</tbody></table></div>
+  {% else %}<div class="empty-state"><i class="fa-regular fa-bell-slash"></i>No alerts match these filters.</div>{% endif %}
+  </div><div class="px-3 pb-3">{{ pager(pg) }}</div>
+</div>
+{% endblock %}

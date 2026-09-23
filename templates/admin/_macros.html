@@ -1,0 +1,60 @@
+{% macro stat_card(s) %}
+<div class="a-card stat-card tone-{{ s.tone }}">
+  <div class="stat-ico"><i class="fa-solid {{ s.icon }}"></i></div>
+  <div><div class="stat-val" {% if s.id %}data-stat="{{ s.id }}"{% endif %}>{{ s.value | na(s.kind) }}</div>
+    <div class="stat-lbl">{{ s.label }}</div>{% if s.hint %}<div class="stat-hint">{{ s.hint }}</div>{% endif %}</div>
+</div>
+{% endmacro %}
+
+{% macro presence_pill(p) -%}
+  {%- if p == 'active' %}<span class="pill green">🟢 Active</span>
+  {%- elif p == 'recent' %}<span class="pill yellow">🟡 Recently Active</span>
+  {%- elif p == 'deactivated' %}<span class="pill red">⛔ Deactivated</span>
+  {%- else %}<span class="pill gray">⚪ Offline</span>{% endif -%}
+{%- endmacro %}
+
+{% macro sev_pill(v) -%}
+  {%- set s = (v or '') | lower -%}
+  {%- if s in ['critical','high','red','extreme'] %}<span class="pill red">{{ v }}</span>
+  {%- elif s in ['warning','medium','moderate','orange','yellow'] %}<span class="pill yellow">{{ v }}</span>
+  {%- elif s in ['low','green','info'] %}<span class="pill green">{{ v }}</span>
+  {%- elif v %}<span class="pill gray">{{ v }}</span>{% else %}—{% endif -%}
+{%- endmacro %}
+
+{% macro cell(row, c) -%}
+  {%- set v = row[c.key] -%}
+  {%- if c.kind == 'sev' %}{{ sev_pill(v) }}
+  {%- elif c.kind == 'presence' %}{{ presence_pill(v) }}
+  {%- elif c.kind == 'active' %}{% if v %}<span class="pill green">Active</span>{% else %}<span class="pill gray">Inactive</span>{% endif %}
+  {%- elif c.kind == 'sensor_status' %}{% if row.is_live %}<span class="pill green">🟢 Live</span>{% elif v == 'active' %}<span class="pill yellow">🟡 Stale</span>{% else %}<span class="pill red">{{ v }}</span>{% endif %}
+  {%- elif c.kind == 'status' %}{% if v in (None, '', '—') %}—{% else %}<span class="pill {{ 'green' if v in ['valid','evaluated','completed','running'] else 'yellow' if v in ['pending','suspicious'] else 'gray' }}">{{ v }}</span>{% endif %}
+  {%- elif v is none or v == '' %}<span class="text-muted">—</span>
+  {%- elif c.kind == 'num' %}{{ '{:,}'.format(v) }}
+  {%- elif c.kind == 'f1' %}{{ '{:,.1f}'.format(v) }}
+  {%- elif c.kind == 'f2' %}{{ '{:,.2f}'.format(v) }}
+  {%- elif c.kind == 'pct1' %}{{ '{:.1f}%'.format(v) }}
+  {%- elif c.kind == 'frac_pct' %}{{ '{:.0f}%'.format(v * 100) }}
+  {%- elif c.kind == 'dt' %}<span class="text-muted">{{ v[:16] }}</span>
+  {%- elif c.href %}<a href="{{ c.href.format(**row) }}">{{ v }}</a>
+  {%- else %}{{ v }}{% endif -%}
+{%- endmacro %}
+
+{% macro pager(p) %}
+{% if p.pages > 1 %}
+<nav class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3" aria-label="Pagination">
+  <small class="text-muted">Page {{ p.page }} of {{ p.pages }} · {{ '{:,}'.format(p.total) }} total</small>
+  <ul class="pagination pagination-sm mb-0">
+    <li class="page-item {{ 'disabled' if not p.prev }}"><a class="page-link" href="{{ p.prev or '#' }}">‹</a></li>
+    {% for n, url, cur in p.numbers %}<li class="page-item {{ 'active' if cur }}"><a class="page-link" href="{{ url }}">{{ n }}</a></li>{% endfor %}
+    <li class="page-item {{ 'disabled' if not p.next }}"><a class="page-link" href="{{ p.next or '#' }}">›</a></li>
+  </ul>
+</nav>
+{% elif p.total %}<small class="text-muted d-block mt-2">{{ '{:,}'.format(p.total) }} record{{ 's' if p.total != 1 }}</small>{% endif %}
+{% endmacro %}
+
+{% macro table(columns, rows, empty='No records found.') %}
+{% if rows %}
+<div class="table-wrap"><table class="a-table"><thead><tr>{% for c in columns %}<th>{{ c.label }}</th>{% endfor %}</tr></thead>
+<tbody>{% for r in rows %}<tr>{% for c in columns %}<td>{{ cell(r, c) }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+{% else %}<div class="empty-state"><i class="fa-regular fa-folder-open"></i>{{ empty }}</div>{% endif %}
+{% endmacro %}
