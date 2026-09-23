@@ -57,6 +57,11 @@ socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="*")
 from api_routes import agri_bp
 app.register_blueprint(agri_bp)
 
+# Register AgriAdvisor WebSockets Gateway
+from agri_sockets import register_agri_sockets
+register_agri_sockets(socketio)
+
+
 
 # Configuration
 OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY', 'demo_key')

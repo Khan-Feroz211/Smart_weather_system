@@ -4,19 +4,27 @@
 {% block content %}
 <div class="container-fluid">
 
-  <!-- Header -->
-  <div class="dashboard-header mb-4">
-    <div class="row align-items-center">
-      <div class="col-md-8">
-        <h1 class="mb-1">
-          <i class="fas fa-seedling me-2"></i>Agriculture Dashboard
-        </h1>
-        <p class="mb-0">Monitor your crops, irrigation, and farm health in real-time</p>
-      </div>
-      <div class="col-md-4 text-end">
-        <div class="live-indicator">
-          <span class="live-dot"></span>
-          Live Monitoring Active
+  <!-- AgriAdvisor Connectivity & Status Banner (v6) -->
+  <div class="row mb-3">
+    <div class="col-12">
+      <div id="agriStatusBanner" class="alert alert-success d-flex align-items-center justify-content-between shadow-sm py-2 px-3 mb-0" role="alert">
+        <div class="d-flex align-items-center gap-2">
+          <i id="agriStatusIcon" class="fas fa-wifi text-success"></i>
+          <div>
+            <strong id="agriStatusHeader">[SIMULATED DATA | ONLINE]</strong>
+            <span id="agriStatusDetail" class="text-muted ms-2 small">Fresh telemetry available via Geovis & Weather Gateway</span>
+          </div>
+        </div>
+        <div class="d-flex align-items-center gap-3">
+          <!-- Socket Connection Status -->
+          <span class="badge bg-secondary" id="socketStatusBadge">
+            <i class="fas fa-plug me-1"></i><span id="socketStatusText">Connecting Socket...</span>
+          </span>
+          <!-- Low-Bandwidth Compact Mode Toggle (Gap 2c) -->
+          <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" id="compactModeToggle">
+            <label class="form-check-label small" for="compactModeToggle">Low-Bandwidth Mode</label>
+          </div>
         </div>
       </div>
     </div>

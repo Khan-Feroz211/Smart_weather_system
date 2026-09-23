@@ -36,6 +36,21 @@ class WeatherSystem {
         this.socket.on('prediction_update', (data) => {
             this.updatePredictions(data);
         });
+
+        // AgriAdvisor v6 WebSockets Gateway Event Listeners
+        this.socket.on('agri_alert', (data) => {
+            this.showNotification(`🌾 AGRI ALERT: ${data.disease || 'Hazard'} - ${data.message || 'Urgent crop action required'}`, 'danger');
+        });
+
+        this.socket.on('connectivity_change', (data) => {
+            this.updateAgriStatusBanner(data.status_header, data.mode);
+        });
+
+        this.socket.on('analysis_response', (data) => {
+            if (data.status_header) {
+                this.updateAgriStatusBanner(data.status_header, data.status_header.includes('OFFLINE') ? 'OFFLINE' : (data.status_header.includes('CACHE') ? 'CACHE' : 'ONLINE'));
+            }
+        });
     }
 
     initializeApp() {
@@ -50,6 +65,119 @@ class WeatherSystem {
         
         // Set up periodic updates
         this.setupPeriodicUpdates();
+
+        // Initialize AgriAdvisor Mobile Draft Autosave (Gap 2d)
+        this.initMobileDraftAutosave();
+
+        // Check and sync offline feedback queue (Gap 1e)
+        this.syncOfflineFeedbackQueue();
+    }
+
+    updateConnectionStatus(isConnected) {
+        const badge = document.getElementById('socketStatusBadge');
+        const text = document.getElementById('socketStatusText');
+        if (badge && text) {
+            if (isConnected) {
+                badge.className = 'badge bg-success';
+                text.textContent = 'Socket Connected';
+                this.syncOfflineFeedbackQueue();
+            } else {
+                badge.className = 'badge bg-danger';
+                text.textContent = 'Socket Disconnected';
+            }
+        }
+    }
+
+    updateAgriStatusBanner(statusHeader, mode) {
+        const headerEl = document.getElementById('agriStatusHeader');
+        const iconEl = document.getElementById('agriStatusIcon');
+        const bannerEl = document.getElementById('agriStatusBanner');
+        const detailEl = document.getElementById('agriStatusDetail');
+
+        if (headerEl) headerEl.textContent = statusHeader;
+        if (!bannerEl) return;
+
+        if (mode === 'OFFLINE' || statusHeader.includes('OFFLINE')) {
+            bannerEl.className = 'alert alert-danger d-flex align-items-center justify-content-between shadow-sm py-2 px-3 mb-0';
+            if (iconEl) iconEl.className = 'fas fa-wifi-slash text-danger';
+            if (detailEl) detailEl.textContent = 'Weather and satellite telemetry withheld offline';
+        } else if (mode === 'CACHE' || statusHeader.includes('CACHE')) {
+            bannerEl.className = 'alert alert-warning d-flex align-items-center justify-content-between shadow-sm py-2 px-3 mb-0';
+            if (iconEl) iconEl.className = 'fas fa-history text-warning';
+            if (detailEl) detailEl.textContent = 'Using cached telemetry (Confidence penalty applied)';
+        } else {
+            bannerEl.className = 'alert alert-success d-flex align-items-center justify-content-between shadow-sm py-2 px-3 mb-0';
+            if (iconEl) iconEl.className = 'fas fa-wifi text-success';
+            if (detailEl) detailEl.textContent = 'Fresh telemetry available via Geovis & Weather Gateway';
+        }
+    }
+
+    initMobileDraftAutosave() {
+        const symptomForm = document.getElementById('symptomForm') || document.querySelector('form.symptom-form');
+        if (!symptomForm) return;
+
+        const DRAFT_KEY = 'agri_symptom_form_draft';
+
+        // Restore saved draft
+        const savedDraft = localStorage.getItem(DRAFT_KEY);
+        if (savedDraft) {
+            try {
+                const formData = JSON.parse(savedDraft);
+                Object.keys(formData).forEach(key => {
+                    const input = symptomForm.elements[key];
+                    if (input) {
+                        if (input.type === 'checkbox') input.checked = formData[key];
+                        else input.value = formData[key];
+                    }
+                });
+                console.log('Restored mobile symptom form draft from localStorage');
+            } catch (e) {
+                console.error('Failed to restore symptom draft', e);
+            }
+        }
+
+        // Save on input change
+        symptomForm.addEventListener('input', () => {
+            const formData = {};
+            Array.from(symptomForm.elements).forEach(el => {
+                if (el.name) {
+                    formData[el.name] = el.type === 'checkbox' ? el.checked : el.value;
+                }
+            });
+            localStorage.setItem(DRAFT_KEY, JSON.stringify(formData));
+        });
+
+        // Clear draft on successful submit
+        symptomForm.addEventListener('submit', () => {
+            localStorage.removeItem(DRAFT_KEY);
+        });
+    }
+
+    async syncOfflineFeedbackQueue() {
+        const QUEUE_KEY = 'agri_offline_feedback_queue';
+        const queueRaw = localStorage.getItem(QUEUE_KEY);
+        if (!queueRaw) return;
+
+        try {
+            const queue = JSON.parse(queueRaw);
+            if (!Array.isArray(queue) || queue.length === 0) return;
+
+            console.log(`Syncing ${queue.length} offline feedback items...`);
+            for (const item of queue) {
+                await fetch('/api/agri/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...item, is_offline: true })
+                });
+            }
+
+            // Sync with backend queue
+            await fetch('/api/agri/sync-feedback', { method: 'POST' });
+            localStorage.removeItem(QUEUE_KEY);
+            console.log('Successfully flushed and synced offline feedback queue');
+        } catch (e) {
+            console.error('Failed to sync offline feedback queue', e);
+        }
     }
 
     startRealTimeClock() {

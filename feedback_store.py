@@ -1,13 +1,14 @@
 """
 feedback_store.py
 =================
-Local SQLite storage for diagnostic outputs, accuracy monitoring, and user feedback.
+Local SQLite storage for diagnostic outputs, accuracy monitoring, user feedback,
+and offline feedback queueing.
 Offline-Safe.
 """
 
 import sqlite3
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 DB_PATH = os.environ.get("AGRI_DB_PATH", "smart_weather.db")
 
@@ -30,6 +31,16 @@ class AccuracyMonitor:
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS offline_feedback_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                crop TEXT,
+                predicted_disease TEXT,
+                actual_disease TEXT,
+                queued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                synced INTEGER DEFAULT 0
+            )
+        """)
         conn.commit()
         conn.close()
 
@@ -43,6 +54,41 @@ class AccuracyMonitor:
         """, (crop, predicted, actual, is_correct, 1 if is_simulated else 0))
         conn.commit()
         conn.close()
+
+    def queue_offline_feedback(self, crop: str, predicted: str, actual: str):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO offline_feedback_queue (crop, predicted_disease, actual_disease)
+            VALUES (?, ?, ?)
+        """, (crop, predicted, actual))
+        conn.commit()
+        conn.close()
+
+    def flush_offline_queue(self) -> int:
+        return self.sync_offline_queue()
+
+
+    def sync_offline_queue(self) -> int:
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, crop, predicted_disease, actual_disease FROM offline_feedback_queue WHERE synced = 0")
+        rows = cursor.fetchall()
+        
+        count = 0
+        for row in rows:
+            q_id, crop, predicted, actual = row
+            is_correct = 1 if predicted.lower() == actual.lower() else 0
+            cursor.execute("""
+                INSERT INTO agri_feedback (crop, predicted_disease, actual_disease, is_correct, is_simulated)
+                VALUES (?, ?, ?, ?, 1)
+            """, (crop, predicted, actual, is_correct))
+            cursor.execute("UPDATE offline_feedback_queue SET synced = 1 WHERE id = ?", (q_id,))
+            count += 1
+
+        conn.commit()
+        conn.close()
+        return count
 
     def get_accuracy_metrics(self) -> Dict[str, Any]:
         conn = sqlite3.connect(self.db_path)
