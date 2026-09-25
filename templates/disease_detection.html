@@ -1,0 +1,417 @@
+{% extends "base.html" %}
+{% block title %}Plant Disease Scanner – Smart AgriWeather{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+  <div class="row mb-4">
+    <div class="col">
+      <h1 class="display-5 fw-bold text-glow mb-2">
+        <i class="fas fa-camera me-2"></i>Plant Disease Scanner
+      </h1>
+      <p class="text-muted">Upload a photo of your plant or leaves and the AI will detect potential diseases using deep learning.</p>
+    </div>
+    <div class="col-auto">
+      <div class="ai-status {% if dl_available %}trained{% else %}warning{% endif %}">
+        <i class="fas fa-{% if dl_available %}brain{% else %}exclamation-triangle{% endif %} me-1"></i>
+        {% if dl_available %}
+          Deep Learning: Ready
+        {% else %}
+          Deep Learning: Unavailable
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Scanner Card -->
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <div class="card-futuristic h-100">
+        <div class="card-header glass-effect">
+          <h5 class="card-title mb-0">
+            <i class="fas fa-upload me-2"></i>Upload Plant Image
+          </h5>
+        </div>
+        <div class="card-body">
+
+          <!-- Crop Selector -->
+          <div class="mb-3">
+            <label for="cropSelect" class="form-label fw-bold">Select Crop</label>
+            <select class="form-select" id="cropSelect">
+              <option value="wheat">🌾 Wheat</option>
+              <option value="rice">🍚 Rice</option>
+              <option value="cotton">🟤 Cotton</option>
+              <option value="maize">🌽 Maize</option>
+            </select>
+          </div>
+
+          <!-- Upload Zone -->
+          <div class="border-2 border-dashed rounded-3 p-4 text-center"
+               id="uploadZone" style="border-color: #0d9481; cursor: pointer;">
+            <i class="fas fa-cloud-upload-alt fa-3x text-teal mb-3"></i>
+            <h6 class="mb-1">Click to upload or drag &amp; drop</h6>
+            <p class="text-muted small mb-0">PNG, JPG, JPEG — max 2 MB</p>
+            <input type="file" id="imageInput" accept="image/*" style="display:none;">
+          </div>
+
+          <!-- Preview -->
+          <div class="mt-3 text-center" id="previewContainer" style="display:none;">
+            <img id="imagePreview" src="" class="img-thumbnail" style="max-height: 200px; max-width: 100%;">
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="d-grid gap-2 mt-3">
+            <button class="btn btn-teal btn-lg" id="scanBtn" onclick="scanImage()" disabled>
+              <i class="fas fa-magic me-2"></i>Scan for Diseases
+            </button>
+            <button class="btn btn-outline-secondary" onclick="resetScanner()">
+              <i class="fas fa-redo me-1"></i>Reset
+            </button>
+          </div>
+
+        </div>
+
+        <!-- Status Banner -->
+        {% if not dl_available %}
+        <div class="card-footer bg-transparent border-top-0">
+          <div class="alert alert-warning mb-0">
+            <i class="fas fa-info-circle me-1"></i>
+            <strong>Deep Learning not active.</strong>
+            Train the model with <code>python train_disease_model.py --synthetic</code>
+            or use the <a href="/api/agri/train-disease-model" target="_blank">API</a>.
+            The rule-based symptom checker remains available below.
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Results Section -->
+  <div class="row justify-content-center mt-4" id="resultsSection" style="display:none;">
+    <div class="col-lg-8">
+      <div class="card-futuristic h-100">
+        <div class="card-header glass-effect">
+          <h5 class="card-title mb-0">
+            <i class="fas fa-clipboard-list me-2"></i>Diagnosis Results
+          </h5>
+        </div>
+        <div class="card-body">
+          <div id="resultsContent">
+            <!-- Results loaded dynamically by JavaScript -->
+          </div>
+
+          <!-- Combined Recommendation (if image results available) -->
+          <div class="mt-4" id="combinedSection" style="display:none;">
+            <h6 class="fw-bold mb-3"><i class="fas fa-cogs me-1"></i>Integrated Recommendation</h6>
+            <div id="combinedContent" class="text-center py-3">
+              <div class="spinner-border text-teal" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+              <p class="text-muted mt-2">Running full analysis...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Symptom-based Fallback -->
+  <div class="row justify-content-center mt-4">
+    <div class="col-lg-8">
+      <div class="card-futuristic">
+        <div class="card-header glass-effect">
+          <h5 class="card-title mb-0">
+            <i class="fas fa-tag me-2"></i>Symptom-Based Diagnosis (Alternative)
+          </h5>
+        </div>
+        <div class="card-body">
+          <p class="text-muted small">Enter observed symptoms if you can't upload an image:</p>
+          <form id="symptomForm" class="row g-3">
+            <div class="col-md-4">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="symptom_yellow_pustules" value="true">
+                <label class="form-check-label" for="symptom_yellow_pustules">Yellow Pustules</label>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="symptom_leaf_lesions" value="true" checked>
+                <label class="form-check-label" for="symptom_leaf_lesions">Leaf Lesions</label>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="symptom_powdery_spots" value="true">
+                <label class="form-check-label" for="symptom_powdery_spots">Powdery Spots</label>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="symptom_brown_spots" value="true">
+                <label class="form-check-label" for="symptom_brown_spots">Brown Spots</label>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="symptom_white_coating" value="true">
+                <label class="form-check-label" for="symptom_white_coating">White Coating</label>
+              </div>
+            </div>
+            <div class="col-12">
+              <button type="button" class="btn btn-teal" onclick="runSymptomDiagnosis()">
+                <i class="fas fa-search me-1"></i>Run Symptom Diagnosis
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const uploadZone = document.getElementById('uploadZone');
+const imageInput = document.getElementById('imageInput');
+const previewContainer = document.getElementById('previewContainer');
+const imagePreview = document.getElementById('imagePreview');
+const scanBtn = document.getElementById('scanBtn');
+let selectedFile = null;
+
+// Click to open file picker
+uploadZone.addEventListener('click', () => imageInput.click());
+
+// Drag & drop
+uploadZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    uploadZone.classList.add('border-primary');
+});
+uploadZone.addEventListener('dragleave', () => {
+    uploadZone.classList.remove('border-primary');
+});
+uploadZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadZone.classList.remove('border-primary');
+    if (e.dataTransfer.files.length > 0) {
+        handleFile(e.dataTransfer.files[0]);
+    }
+});
+
+// File selection
+imageInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+        handleFile(e.target.files[0]);
+    }
+});
+
+function handleFile(file) {
+    if (!file.type.startsWith('image/')) {
+        showNotification('Please select a valid image file (PNG/JPG).', 'error');
+        return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+        showNotification('File too large. Max 2 MB.', 'error');
+        return;
+    }
+    selectedFile = file;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        imagePreview.src = e.target.result;
+        previewContainer.style.display = 'block';
+        scanBtn.disabled = false;
+    };
+    reader.readAsDataURL(file);
+}
+
+async function scanImage() {
+    if (!selectedFile) {
+        showNotification('Please upload an image first.', 'error');
+        return;
+    }
+
+    const crop = document.getElementById('cropSelect').value;
+
+    // Show loading state
+    scanBtn.disabled = true;
+    scanBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Scanning...';
+
+    try {
+        const formData = new FormData();
+        formData.append('image', selectedFile);
+        formData.append('crop', crop);
+        formData.append('top_k', '3');
+
+        const response = await fetch('/api/agri/disease-diagnose', {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        // Display results
+        const resultsContent = document.getElementById('resultsContent');
+        const resultsSection = document.getElementById('resultsSection');
+        resultsSection.style.display = 'block';
+
+        let html = '';
+
+        if (data.image_analysis && data.image_analysis.available) {
+            // DL results section
+            const predictions = data.diagnoses || [];
+            html += '<div class="mb-3"><h6 class="fw-bold text-teal"><i class="fas fa-brain me-1"></i>Deep Learning Results</h6>';
+            html += '<div class="list-group">';
+            predictions.forEach((pred, idx) => {
+                const badge = pred.urgency === 'critical' ? 'bg-danger' :
+                              pred.urgency === 'high' ? 'bg-warning' :
+                              pred.urgency === 'medium' ? 'bg-info' : 'bg-success';
+                const icon = idx === 0 ? '🏆' : '';
+                html += `<div class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>${icon} ${pred.disease}</strong>
+                        <div class="text-muted small">${pred.explanation || ''}</div>
+                        ${pred.treatment ? '<div class="text-muted small mt-1"><i class="fas fa-syringe me-1"></i>' + pred.treatment + '</div>' : ''}
+                    </div>
+                    <span class="badge ${badge} rounded-pill">${(pred.confidence || pred.confidence_calibrated * 100).toFixed(0)}%</span>
+                </div>`;
+            });
+            html += '</div></div>';
+
+            // Symptom-based results
+            html += '<div class="mb-3"><h6 class="fw-bold text-teal"><i class="fas fa-tag me-1"></i>Rule-Based Symptom Results</h6>';
+            html += '<div class="list-group">';
+            (data.diagnoses || []).forEach((diag) => {
+                const badge = diag.urgency === 'critical' ? 'bg-danger' :
+                              diag.urgency === 'high' ? 'bg-warning' :
+                              diag.urgency === 'medium' ? 'bg-info' : 'bg-success';
+                html += `<div class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>${diag.disease}</strong>
+                        <div class="text-muted small">${diag.evidence?.join(', ') || ''}</div>
+                    </div>
+                    <span class="badge ${badge} rounded-pill">${Math.round((diag.confidence_calibrated || 0) * 100)}%</span>
+                </div>`;
+            });
+            html += '</div></div>';
+        } else {
+            // No DL available, show fallback
+            html += '<div class="alert alert-warning"><i class="fas fa-exclamation-triangle me-1"></i>';
+            html += (data.error || 'Deep learning not available.');
+            html += '</div>';
+
+            // Show rule-based results if available
+            if (data.diagnoses && data.diagnoses.length > 0) {
+                html += '<div class="mb-3"><h6 class="fw-bold">Symptom-Based Results</h6>';
+                data.diagnoses.forEach((diag) => {
+                    const badge = diag.urgency === 'critical' ? 'bg-danger' : 'bg-warning';
+                    html += `<div class="list-group-item">
+                        <strong>${diag.disease}</strong>
+                        <span class="badge ${badge} rounded-pill">${Math.round((diag.confidence_calibrated || 0) * 100)}%</span>
+                        <div class="text-muted small mt-1">${diag.explanation}</div>
+                    </div>`;
+                });
+                html += '</div>';
+            }
+        }
+
+        resultsContent.innerHTML = html;
+
+        // Trigger combined recommendation
+        runCombinedRecommendation(data);
+    } catch (err) {
+        showNotification('Error scanning image: ' + err.message, 'error');
+    } finally {
+        scanBtn.disabled = false;
+        scanBtn.innerHTML = '<i class="fas fa-magic me-2"></i>Scan for Diseases';
+    }
+}
+
+async function runCombinedRecommendation(diagnosisData) {
+    const combinedSection = document.getElementById('combinedSection');
+    const combinedContent = document.getElementById('combinedContent');
+    combinedSection.style.display = 'block';
+
+    try {
+        const formData = new FormData();
+        formData.append('image', selectedFile);
+        formData.append('crop', document.getElementById('cropSelect').value);
+        formData.append('symptoms', JSON.stringify({yellow_pustules: true, leaf_lesions: true}));
+
+        const response = await fetch('/api/agri/analyze', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+
+        let html = '';
+        if (data.geovis_satellite && data.geovis_satellite.available) {
+            const sat = data.geovis_satellite.data;
+            html += `<div class="row text-center mb-2">
+                <div class="col-4"><small>NDVI</small><strong>${sat.ndvi}</strong></div>
+                <div class="col-4"><small>Soil Moisture</small><strong>${sat.soil_moisture_index}</strong></div>
+                <div class="col-4"><small>Canopy</small><strong>${sat.canopy_stress}</strong></div>
+            </div>`;
+        }
+        if (data.yield_estimate && data.yield_estimate.available) {
+            html += `<p class="small"><i class="fas fa-chart-bar me-1"></i>Yield Impact: ${data.yield_estimate.impact_percentage}%</p>`;
+        }
+        if (data.crop_suitability && data.crop_suitability.available) {
+            html += `<p class="small"><i class="fas fa-seedling me-1"></i>Recommended: ${data.crop_suitability.rankings.join(', ')}</p>`;
+        }
+        combinedContent.innerHTML = html || '<p class="text-muted">Analysis complete.</p>';
+    } catch (err) {
+        combinedContent.innerHTML = '<p class="text-warning small">Combined analysis unavailable: ' + err.message + '</p>';
+    }
+}
+
+async function runSymptomDiagnosis() {
+    const symptoms = {};
+    ['yellow_pustules','leaf_lesions','powdery_spots','brown_spots','white_coating'].forEach(s => {
+        const el = document.getElementById('symptom_' + s);
+        if (el && el.checked) symptoms[s] = true;
+    });
+    const crop = document.getElementById('cropSelect').value;
+
+    try {
+        const response = await fetch('/api/agri/analyze', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({crop: crop, symptoms: symptoms, top_k: 3})
+        });
+        const data = await response.json();
+
+        const resultsSection = document.getElementById('resultsSection');
+        const resultsContent = document.getElementById('resultsContent');
+        resultsSection.style.display = 'block';
+
+        let html = '<div class="mb-3"><h6 class="fw-bold text-teal">Symptom-Based Diagnosis</h6><div class="list-group">';
+        data.diagnoses.forEach((diag) => {
+            const badge = diag.urgency === 'critical' ? 'bg-danger' :
+                          diag.urgency === 'high' ? 'bg-warning' : 'bg-info';
+            html += `<div class="list-group-item">
+                <strong>${diag.disease}</strong>
+                <span class="badge ${badge} rounded-pill">${Math.round((diag.confidence_calibrated || 0) * 100)}%</span>
+                <div class="text-muted small mt-1">${diag.explanation}</div>
+                <div class="text-muted small">${diag.evidence?.join(', ') || ''}</div>
+            </div>`;
+        });
+        html += '</div></div>';
+        resultsContent.innerHTML = html;
+
+        // Hide combined section (no image)
+        document.getElementById('combinedSection').style.display = 'none';
+    } catch (err) {
+        showNotification('Error: ' + err.message, 'error');
+    }
+}
+
+function resetScanner() {
+    selectedFile = null;
+    imageInput.value = '';
+    previewContainer.style.display = 'none';
+    imagePreview.src = '';
+    scanBtn.disabled = true;
+    document.getElementById('resultsSection').style.display = 'none';
+}
+</script>
+{% endblock %}

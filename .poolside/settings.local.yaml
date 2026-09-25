@@ -49,3 +49,20 @@ tools:
             - git *
             - Format-Table *
             - .venv\Scripts\python *
+            - Write-Host "---"
+            - wc *
+            - Measure-Object *
+            - $OutputEncoding *
+            - Out-File *
+            - Write-Host "Done extracting all"
+            - Test-Path *
+            - Test-Path LICENSE
+            - Sort-Object
+            - cmd *
+            - pip install torch torchvision *
+            - tail *
+            - out-file *
+            - type *
+            - grep *
+            - Get-Command python *
+            - $env:PYTHONIOENCODING *

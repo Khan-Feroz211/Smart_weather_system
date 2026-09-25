@@ -1,0 +1,23 @@
+{
+  "classes": [
+    "wheat_rust",
+    "wheat_leaf_blight",
+    "wheat_powdery_mildew",
+    "wheat_healthy",
+    "rice_blast",
+    "rice_bacterial_blight",
+    "rice_brown_spot",
+    "rice_healthy",
+    "cotton_leaf_curl_virus",
+    "cotton_fusarium_wilt",
+    "cotton_healthy",
+    "maize_common_rust",
+    "maize_healthy"
+  ],
+  "best_val_accuracy": 1.0,
+  "epochs": 2,
+  "image_size": 224,
+  "engine_version": "v1.0-dl",
+  "trained_at": "2026-09-24T22:09:14.939499Z",
+  "torch_version": "2.14.0+cpu"
+}

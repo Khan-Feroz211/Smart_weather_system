@@ -23,7 +23,12 @@ if __name__ == '__main__':
     print("=" * 60)
     print(f"  Server: http://localhost:8000")
     print(f"  Dashboard: http://localhost:8000/dashboard")
+    print(f"  Agriculture: http://localhost:8000/agri")
+    print(f"  Disease Scanner: http://localhost:8000/agri/disease-detection")
     print(f"  API: http://localhost:8000/api/hazards/predict")
+    print(f"  Agri API: http://localhost:8000/api/agri/analyze")
+    print(f"  Disease API: http://localhost:8000/api/agri/disease-diagnose")
+    print(f"  Status API: http://localhost:8000/api/agri/status")
     print("=" * 60)
     print("\nPress Ctrl+C to stop.\n")
 

@@ -71,4 +71,5 @@ gdacs_rss_information.csv
 # Temp/debug scripts and analysis dumps
 _check_compile.py
 _final_check.py
+_*.py
 _*.txt

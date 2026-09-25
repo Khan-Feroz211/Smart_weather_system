@@ -1,15 +1,18 @@
 """
 recommendation_engine.py
 ========================
-AgriAdvisor Recommendation Engine (v6 + Mobile/Offline + Geovis Satellite).
-Orchestrates disease detection, yield estimation, crop suitability, satellite data analysis,
-and feedback store logging.
+AgriAdvisor Recommendation Engine (v6 + Mobile/Offline + Geovis Satellite +
+Deep-Learning Disease Image Recognition).
+
+Orchestrates disease detection (rule-based + CNN image), yield estimation,
+crop suitability, satellite data analysis, and feedback store logging.
 Supports compact mode for low-bandwidth mobile environments.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 from datetime import datetime
 import os
+import io
 import requests
 from disease_detection import DiseaseDetector
 from yield_estimator import YieldEstimator
@@ -18,9 +21,29 @@ from geovis_satellite import GeoVisSatelliteAnalyzer
 from feedback_store import AccuracyMonitor
 from integration_bridge import SystemBridge
 
-ENGINE_VERSION = "v6.1-geovis"
+ENGINE_VERSION = "v6.2-hybrid"
 OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY', 'demo_key')
 OPENWEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
+
+# Deep-learning disease classifier (lazy-loaded singleton)
+_dl_classifier = None
+_dl_available = False
+
+
+def _get_dl_classifier():
+    """Lazy-initialise the deep-learning classifier singleton."""
+    global _dl_classifier, _dl_available
+    if _dl_classifier is not None:
+        return _dl_classifier, _dl_available
+    try:
+        from plant_disease_model import PlantDiseaseClassifier
+        _dl_classifier = PlantDiseaseClassifier()
+        _dl_available = _dl_classifier.is_available()
+    except Exception:
+        _dl_classifier = None
+        _dl_available = False
+    return _dl_classifier, _dl_available
+
 
 class RecommendationEngine:
     def __init__(self):
@@ -61,8 +84,36 @@ class RecommendationEngine:
         stage: str = "heading",
         connectivity_state: str = "ONLINE",
         data_age_hours: float = 0.0,
-        compact: bool = False
+        compact: bool = False,
+        image_input: Optional[Union[bytes, str, Any]] = None,
+        top_k: int = 3,
     ) -> Dict[str, Any]:
+        """
+        Run the full AgriAdvisor recommendation pipeline.
+
+        Parameters
+        ----------
+        crop : str
+            Crop name (wheat, rice, cotton, maize).
+        symptoms : dict | None
+            Symptom flags reported by the user (rule-based tier input).
+        site : dict | None
+            Weather telemetry. If None, live or simulated telemetry is used.
+        stage : str
+            Crop growth stage.
+        connectivity_state : str
+            "ONLINE", "CACHE", or "OFFLINE".
+        data_age_hours : float
+            Staleness of cached data (hours).
+        compact : bool
+            If True, trims verbose fields for low-bandwidth mobile clients.
+        image_input : bytes | str | PIL.Image | np.ndarray | None
+            If provided, runs the deep-learning CNN disease classifier on
+            the uploaded plant image and fuses results with the rule-based
+            diagnosis.
+        top_k : int
+            Number of top DL predictions to fuse.
+        """
         if symptoms is None:
             symptoms = {"yellow_pustules": True, "leaf_lesions": True}
 
@@ -94,8 +145,39 @@ class RecommendationEngine:
         else:
             status_line = f"[{provenance_str} | ONLINE]"
 
-        # 4. Disease Diagnosis (Pure Local / Offline-Safe)
-        diagnoses = self.detector.diagnose_with_uncertainty(crop, symptoms)
+        # 4. Disease Diagnosis — hybrid (DL image + rule-based symptoms)
+        dl_classifier, dl_available = _get_dl_classifier()
+
+        if image_input is not None and dl_available:
+            # Run hybrid diagnosis: fuse image (DL) + symptom (rule) evidence
+            diagnoses = self.detector.diagnose_hybrid(
+                crop, symptoms, image_input, top_k=top_k
+            )
+            image_analysis_summary = {
+                "available": True,
+                "source": "deep_learning_cnn_resnet18",
+                "crop_hint": crop,
+            }
+        elif image_input is not None and not dl_available:
+            # Image was provided but DL backend is unavailable — fall back
+            diagnoses = self.detector.diagnose_with_uncertainty(crop, symptoms)
+            for d in diagnoses:
+                d["image_analysis"] = {
+                    "available": False,
+                    "message": "Image provided but deep-learning backend is "
+                               "not available. Rule-based diagnosis only.",
+                    "source": "fallback_rule_based",
+                }
+            image_analysis_summary = {
+                "available": False,
+                "source": "unavailable",
+                "message": "Deep-learning backend not available. "
+                           "Install torch + train model (python train_disease_model.py).",
+            }
+        else:
+            # No image — pure rule-based (original behaviour)
+            diagnoses = self.detector.diagnose_with_uncertainty(crop, symptoms)
+            image_analysis_summary = {"available": False, "source": "none"}
 
         # Apply confidence penalty to diagnoses if in CACHE mode
         if penalty > 0 and eff_state == "CACHE":
@@ -137,10 +219,32 @@ class RecommendationEngine:
             "status_header": status_line,
             "generated_at": datetime.utcnow().isoformat() + "Z",
             "engine_version": ENGINE_VERSION,
+            "crop": crop,
+            "growth_stage": stage,
+            "connectivity_state": eff_state,
             "diagnoses": diagnoses,
+            "image_analysis": image_analysis_summary,
             "geovis_satellite": satellite_res,
             "yield_estimate": yield_res,
             "crop_suitability": suitability_res
         }
 
         return output
+
+    def diagnose_from_image(
+        self,
+        image_input: Union[bytes, str, Any],
+        crop: str = "wheat",
+        top_k: int = 3,
+        connectivity_state: str = "ONLINE",
+    ) -> Dict[str, Any]:
+        """
+        Convenience method: run disease diagnosis on an image and return
+        a rich result dict (includes weather + yield context).
+        """
+        return self.analyze(
+            crop=crop,
+            image_input=image_input,
+            connectivity_state=connectivity_state,
+            top_k=top_k,
+        )

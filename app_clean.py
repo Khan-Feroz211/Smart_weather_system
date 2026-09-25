@@ -51,6 +51,7 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'smart_weather_ai_2024')
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024  # 2 MB upload limit for disease image uploads
 socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="*")
 
 # Register AgriAdvisor API Blueprint (v6)
@@ -2092,6 +2093,24 @@ def agri_dashboard():
         return render_template('agri_dashboard.html', now=datetime.now())
     finally:
         conn.close()
+
+
+@app.route('/agri/disease-detection')
+def disease_detection():
+    """Plant disease detection page — upload a leaf image for CNN diagnosis."""
+    # Check if the deep-learning backend is available
+    dl_available = False
+    try:
+        from plant_disease_model import PlantDiseaseClassifier
+        dl_available = PlantDiseaseClassifier.is_available()
+    except Exception:
+        dl_available = False
+
+    return render_template(
+        'disease_detection.html',
+        now=datetime.now(),
+        dl_available=dl_available,
+    )
 
 
 @app.route('/farms')
