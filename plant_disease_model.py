@@ -68,8 +68,19 @@ try:
 
     TORCH_AVAILABLE = True
 except Exception:  # pragma: no cover - exercised only when torch is absent
+    # All names imported in the try-block must be defined here so that the
+    # rest of the module (class definitions, function signatures, etc.) can
+    # be parsed without NameError.  Callers should check TORCH_AVAILABLE
+    # before using any of these.
     torch = None  # type: ignore[assignment]
     torchvision = None  # type: ignore[assignment]
+    nn = None  # type: ignore[assignment]
+    optim = None  # type: ignore[assignment]
+    Dataset = object  # type: ignore[assignment,misc]  # fallback base class
+    DataLoader = None  # type: ignore[assignment]
+    transforms = None  # type: ignore[assignment]
+    resnet18 = None  # type: ignore[assignment]
+    ResNet18_Weights = None  # type: ignore[assignment]
 
 # --------------------------------------------------------------------------- #
 # Optional Pillow dependency (same graceful-degradation philosophy)
@@ -281,6 +292,11 @@ class _SyntheticDiseaseDataset(Dataset):
     """
 
     def __init__(self, classes: List[str], n_per_class: int = 200, seed: int = 42):
+        if not TORCH_AVAILABLE:
+            raise RuntimeError(
+                "PyTorch is required for _SyntheticDiseaseDataset but is not available. "
+                "Install torch + torchvision or use the rule-based tier instead."
+            )
         self.classes = classes
         self.n_per_class = n_per_class
         self.seed = seed

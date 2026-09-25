@@ -41,6 +41,7 @@ logs/
 
 # Cache
 .cache/
+cache/
 .pytest_cache/
 .poolside/
 .codebase-memory/

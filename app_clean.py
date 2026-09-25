@@ -2018,7 +2018,7 @@ def agri_dashboard():
     conn = get_db_connection()
     if not conn:
         flash('Database error', 'error')
-        return render_template('agri_dashboard.html', now=datetime.now())
+        return render_template('agri_dashboard.html', avg_health=0, now=datetime.now())
     try:
         farms       = conn.execute('SELECT * FROM farms ORDER BY created_at DESC').fetchall()
         total_farms = len(farms)
@@ -2081,6 +2081,11 @@ def agri_dashboard():
         ''').fetchone()
         avg_health = round(avg_health_row[0] or 0, 1)
 
+        # Convert SQLite rows to plain dicts so Jinja2 `|tojson` works
+        # without raising Undefined/NoneType serialization errors.
+        health_rows = [dict(row) for row in health_rows]
+        yield_summary = [dict(row) for row in yield_summary]
+
         return render_template('agri_dashboard.html',
                                farms=farms, total_farms=total_farms,
                                total_fields=total_fields, health_rows=health_rows,
@@ -2090,7 +2095,7 @@ def agri_dashboard():
                                avg_health=avg_health, now=datetime.now())
     except Exception as e:
         flash(f'Agriculture dashboard error: {e}', 'error')
-        return render_template('agri_dashboard.html', now=datetime.now())
+        return render_template('agri_dashboard.html', avg_health=0, now=datetime.now())
     finally:
         conn.close()
 
