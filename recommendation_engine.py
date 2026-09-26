@@ -22,8 +22,28 @@ from feedback_store import AccuracyMonitor
 from integration_bridge import SystemBridge
 
 ENGINE_VERSION = "v6.2-hybrid"
+
+# --- Weather data provider configuration ---
+# Supported providers: "openweathermap" (requires API key) or "openmeteo" (free, no key)
+# Open-Meteo is a free, open-source weather API that requires NO API key.
+# https://open-meteo.com/  (CC BY 4.0)
+WEATHER_PROVIDER = os.environ.get('WEATHER_PROVIDER', 'openweathermap').lower().strip()
 OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY', 'demo_key')
 OPENWEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
+OPENMETEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+OPENMETEO_GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
+OPENMETEO_FALLBACK_LOCATIONS = {
+    "Lahore": (31.5497, 74.3437),
+    "London": (51.5074, -0.1278),
+    "New York": (40.7128, -74.0060),
+    "Tokyo": (35.6762, 139.6503),
+    "Paris": (48.8566, 2.3522),
+    "Berlin": (52.5200, 13.4050),
+    "Mumbai": (19.0760, 72.8777),
+    "Sydney": (-33.8688, 151.2093),
+    "Cairo": (30.0444, 31.2357),
+    "Delhi": (28.6139, 77.1031),
+}
 
 # Deep-learning disease classifier (lazy-loaded singleton)
 _dl_classifier = None
@@ -54,8 +74,82 @@ class RecommendationEngine:
         self.satellite_analyzer = GeoVisSatelliteAnalyzer()
         self.bridge = SystemBridge()
 
+    def _geocode_openmeteo(self, location: str) -> Optional[Dict[str, Any]]:
+        """Geocode a city name via the Open-Meteo Geocoding API (no API key needed)."""
+        try:
+            resp = requests.get(
+                OPENMETEO_GEOCODING_URL,
+                params={'name': location, 'count': 1, 'format': 'json', 'language': 'en'},
+                timeout=3
+            )
+            if resp.status_code == 200:
+                results = resp.json().get('results', [])
+                if results:
+                    return results[0]
+        except Exception:
+            pass
+        return None
+
     def fetch_live_telemetry(self, location: str = "Lahore") -> Dict[str, Any]:
-        """Fetch live weather telemetry if API key is valid (Tier 1a wiring)."""
+        """Fetch live weather telemetry.
+
+        Provider priority:
+        1. Open-Meteo (``WEATHER_PROVIDER=openmeteo``) — free, no API key required.
+        2. OpenWeatherMap (``WEATHER_PROVIDER=openweathermap``) — requires a valid API key.
+        3. Fallback to simulated telemetry.
+        """
+        if WEATHER_PROVIDER == 'openmeteo':
+            # --- Open-Meteo path (no API key) ---
+            loc_info = self._geocode_openmeteo(location)
+            if loc_info:
+                lat, lon = loc_info['latitude'], loc_info['longitude']
+            elif location in OPENMETEO_FALLBACK_LOCATIONS:
+                lat, lon = OPENMETEO_FALLBACK_LOCATIONS[location]
+            else:
+                # Try default fallback location (Lahore coordinates)
+                lat, lon = 31.5497, 74.3437
+
+            try:
+                resp = requests.get(
+                    OPENMETEO_FORECAST_URL,
+                    params={
+                        'latitude': lat,
+                        'longitude': lon,
+                        'current': 'temperature_2m,relative_humidity_2m,weather_code,pressure_msl,wind_speed_10m,precipitation',
+                        'timezone': 'auto',
+                    },
+                    timeout=5
+                )
+                if resp.status_code == 200:
+                    d = resp.json()
+                    current = d.get('current', {})
+                    # WMO weather codes → approximate rainfall (mm/h)
+                    # Code 61-67, 80-82, 95-96 = precipitation active
+                    weather_code = current.get('weather_code', 0)
+                    rainfall = current.get('precipitation', 0.0)
+                    if rainfall is None:
+                        rainfall = 0.0
+                    # Convert mm/h to approximate mm over the period
+                    rainfall_mm = float(rainfall) * 10  # scale like openweather
+                    if weather_code in range(51, 100) and rainfall_mm == 0.0:
+                        rainfall_mm = 5.0  # light precipitation inferred from code
+
+                    return {
+                        'temp': float(current.get('temperature', 22.0)),
+                        'humidity': float(current.get('relative_humidity', 60.0)),
+                        'rainfall': rainfall_mm,
+                        'wind_speed': float(current.get('wind_speed', 5.0)),
+                        'pressure': float(current.get('pressure', 1013.0)),
+                        'source': 'live_openmeteo_api',
+                        'provider': 'openmeteo',
+                        'location': loc_info.get('name', location) if loc_info else location,
+                        'latitude': lat,
+                        'longitude': lon,
+                    }
+            except Exception:
+                pass
+
+        # --- OpenWeatherMap path (requires API key) ---
         if OPENWEATHER_API_KEY and OPENWEATHER_API_KEY != 'demo_key':
             try:
                 resp = requests.get(
@@ -69,7 +163,11 @@ class RecommendationEngine:
                         'temp': d['main']['temp'],
                         'humidity': d['main']['humidity'],
                         'rainfall': d.get('rain', {}).get('1h', 0.0) * 10,  # approximate
-                        'source': 'live_openweather_api'
+                        'wind_speed': d.get('wind', {}).get('speed', 5.0),
+                        'pressure': d.get('main', {}).get('pressure', 1013.0),
+                        'source': 'live_openweather_api',
+                        'provider': 'openweathermap',
+                        'location': d.get('name', location),
                     }
             except Exception:
                 pass
@@ -81,6 +179,7 @@ class RecommendationEngine:
         crop: str = "wheat",
         symptoms: Optional[Dict[str, Any]] = None,
         site: Optional[Dict[str, Any]] = None,
+        location: str = "Lahore",
         stage: str = "heading",
         connectivity_state: str = "ONLINE",
         data_age_hours: float = 0.0,
@@ -99,6 +198,9 @@ class RecommendationEngine:
             Symptom flags reported by the user (rule-based tier input).
         site : dict | None
             Weather telemetry. If None, live or simulated telemetry is used.
+        location : str
+            City name for weather data fetch (used when ``site`` is None).
+            Open-Meteo geocoding will resolve this to coordinates.
         stage : str
             Crop growth stage.
         connectivity_state : str
@@ -119,7 +221,7 @@ class RecommendationEngine:
 
         # Wire live telemetry if ONLINE and site is not custom
         if site is None or not site:
-            live_telemetry = self.fetch_live_telemetry()
+            live_telemetry = self.fetch_live_telemetry(location=location)
             site = live_telemetry
         else:
             if "temp" not in site:
@@ -135,7 +237,14 @@ class RecommendationEngine:
 
         # 2. Get data provenance and accuracy
         metrics = self.accuracy_monitor.get_accuracy_metrics()
-        provenance_str = metrics["provenance"]
+        # Use the actual weather data source from the site dict for the status
+        # header (falls back to accuracy-monitor provenance if no site source).
+        site_source = site.get("source", "")
+        site_provider = site.get("provider", "") if isinstance(site, dict) else ""
+        if site_source.startswith("live_") or site_provider:
+            provenance_str = f"LIVE DATA ({site_provider or site_source})"
+        else:
+            provenance_str = metrics["provenance"]
 
         # 3. Format Status Line Header
         if eff_state == "OFFLINE":

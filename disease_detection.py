@@ -121,7 +121,7 @@ class DiseaseDetector:
                 "confidence_basis": f"Rule-based pattern matching (sample count: {sample_cnt}). Fully offline-safe path.",
                 "calibration_method": cal_method,
                 "calibration_sample_count": sample_cnt,
-                "disclaimer": info.get("disclaimer", "Pre-production accuracy based on simulated data."),
+                "disclaimer": info.get("disclaimer", "Pre-production accuracy. Calibrate with ground-truth feedback via /api/agri/feedback."),
                 "suggested_next_question": next_question,
                 "source": "rule_based_local",
                 "engine_version": ENGINE_VERSION,

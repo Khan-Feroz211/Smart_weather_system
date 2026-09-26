@@ -196,6 +196,25 @@ class MultiHazardClassifier:
         self.ml_model = ml_model
         self.feature_names = feature_names or []
         self.hazard_categories = HAZARD_CATEGORIES
+        self._flood_data_cache: Optional[Dict[str, Any]] = None
+
+    def fetch_flood_risk(self, location: str = "Lahore") -> Dict[str, Any]:
+        """Fetch live river discharge and flood risk from Open-Meteo Flood API.
+
+        Caches the result for the lifetime of this instance so repeated
+        calls within a single request cycle reuse the data.
+        """
+        if self._flood_data_cache is not None:
+            return self._flood_data_cache
+
+        try:
+            from openmeteo_integration import fetch_flood_data
+            self._flood_data_cache = fetch_flood_data(location, days=7)
+        except Exception as exc:
+            logger.warning("Flood API fetch failed: %s", exc)
+            self._flood_data_cache = {"available": False, "error": str(exc)}
+
+        return self._flood_data_cache
 
     def classify_hazards(
         self,
@@ -275,7 +294,7 @@ class MultiHazardClassifier:
         # Determine if alert is required
         alert_required = len(active_hazards) > 0
 
-        return {
+        result = {
             "hazard_probabilities": {k: round(v, 4) for k, v in combined_probabilities.items()},
             "risk_levels": risk_levels,
             "active_hazards": active_hazards,
@@ -287,6 +306,39 @@ class MultiHazardClassifier:
             "risk_colors": RISK_COLORS,
             "timestamp": datetime.now().isoformat(),
         }
+
+        # Augment flood risk with live Open-Meteo river discharge data
+        try:
+            location = weather_data.get("location", "Lahore")
+            self._augment_with_openmeteo_flood(result, location)
+        except Exception as exc:
+            logger.debug("Flood augmentation skipped: %s", exc)
+
+        return result
+
+    def _augment_with_openmeteo_flood(self, result: Dict[str, Any], location: str) -> None:
+        """Augment the classification result with Open-Meteo flood data.
+
+        Merges live river-discharge data into the heavy_rain_flood probability
+        so the flood risk reflects both weather-based thresholds AND actual
+        river conditions.
+        """
+        flood = self.fetch_flood_risk(location)
+        result["openmeteo_flood"] = flood
+        if flood.get("available"):
+            max_discharge = flood.get("summary", {}).get("max_discharge_m3s", 0.0)
+            flood_risk = flood.get("flood_risk", "low")
+            # Augment the flood probability with river discharge data
+            if flood_risk == "high":
+                result["hazard_probabilities"]["heavy_rain_flood"] = max(
+                    result["hazard_probabilities"].get("heavy_rain_flood", 0.0), 0.95
+                )
+                result["risk_levels"]["heavy_rain_flood"] = "red"
+            elif flood_risk == "moderate":
+                result["hazard_probabilities"]["heavy_rain_flood"] = max(
+                    result["hazard_probabilities"].get("heavy_rain_flood", 0.0), 0.65
+                )
+                result["risk_levels"]["heavy_rain_flood"] = "orange"
 
     def _compute_rule_based_probabilities(self, weather_data: Dict[str, Any]) -> Dict[str, float]:
         """

@@ -19,8 +19,13 @@ import os
 import io
 import json
 
-from recommendation_engine import RecommendationEngine, _get_dl_classifier
+from recommendation_engine import (
+    RecommendationEngine, _get_dl_classifier, WEATHER_PROVIDER,
+    OPENWEATHER_API_KEY,
+)
 from feedback_store import AccuracyMonitor
+from plant_disease_model import PlantDiseaseClassifier, TORCH_AVAILABLE
+from openmeteo_integration import geocode_location
 from plant_disease_model import PlantDiseaseClassifier, TORCH_AVAILABLE
 
 agri_bp = Blueprint("agri_bp", __name__)
@@ -148,6 +153,7 @@ def analyze_crop():
         return jsonify({"error": "Bad Request", "message": err_msg}), 400
 
     crop = data.get("crop", "wheat")
+    location = data.get("location", "Lahore")
     # Symptoms may come as JSON string in multipart form
     symptoms_raw = data.get("symptoms", '{"yellow_pustules": true, "leaf_lesions": true}')
     if isinstance(symptoms_raw, str):
@@ -175,6 +181,7 @@ def analyze_crop():
         crop=crop,
         symptoms=symptoms,
         site=site,
+        location=location,
         stage=stage,
         connectivity_state=connectivity_state,
         data_age_hours=data_age_hours,
@@ -325,5 +332,66 @@ def get_status():
             "classes": clf.classes,
             "num_classes": len(clf.classes),
         },
+        "weather": {
+            "provider": WEATHER_PROVIDER,
+            "openweather_key_configured": bool(
+                OPENWEATHER_API_KEY and not OPENWEATHER_API_KEY.startswith('demo_key')
+            ),
+        },
         "dev_warning": "Localhost/dev mode. Pass X-API-Key header when auth is enabled."
     })
+
+
+@agri_bp.route("/api/agri/openmeteo", methods=["GET"])
+def get_openmeteo_data():
+    """
+    Fetch comprehensive Open-Meteo data (satellite, flood, climate, seasonal)
+    for a given location.
+
+    Query parameters:
+      - location: City name (default: "Lahore")
+      - datasets: Comma-separated list of datasets to fetch (default: "all")
+        Options: satellite, flood, climate, seasonal
+
+    Returns JSON with availability flags for each dataset.
+    """
+    if not check_auth():
+        return jsonify({"error": "Unauthorized", "message": "Invalid or missing X-API-Key header"}), 401
+
+    location = request.args.get("location", "Lahore")
+    datasets = request.args.get("datasets", "all").split(",")
+
+    from openmeteo_integration import (
+        fetch_satellite_data, fetch_flood_data,
+        fetch_climate_data, fetch_seasonal_data,
+    )
+
+    result = {"location": location, "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z"}
+
+    try:
+        geo_info = geocode_location(location)
+        if geo_info:
+            result["geocoding"] = {
+                "name": geo_info.get("name", location),
+                "latitude": geo_info.get("latitude"),
+                "longitude": geo_info.get("longitude"),
+                "country": geo_info.get("country", ""),
+                "source": geo_info.get("source", ""),
+            }
+    except Exception:
+        pass
+
+    if "all" in datasets or "satellite" in datasets:
+        result["satellite"] = fetch_satellite_data(location, days=7)
+
+    if "all" in datasets or "flood" in datasets:
+        result["flood"] = fetch_flood_data(location, days=7)
+
+    if "all" in datasets or "climate" in datasets:
+        result["climate"] = fetch_climate_data(location)
+
+    if "all" in datasets or "seasonal" in datasets:
+        result["seasonal"] = fetch_seasonal_data(location)
+
+    result["attribution"] = "Data © Open-Meteo (CC BY 4.0) — free for non-commercial use"
+    return jsonify(result)

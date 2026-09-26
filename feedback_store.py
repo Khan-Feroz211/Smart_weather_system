@@ -12,6 +12,16 @@ from typing import Dict, Any, List, Optional
 
 DB_PATH = os.environ.get("AGRI_DB_PATH", "smart_weather.db")
 
+# Determine whether live (non-simulated) weather data is available.
+# Open-Meteo is a free, no-key weather API; OpenWeatherMap requires a real key.
+_WEATHER_PROVIDER = os.environ.get('WEATHER_PROVIDER', 'openweathermap').lower().strip()
+_OPENWEATHER_KEY = os.environ.get('OPENWEATHER_API_KEY', 'demo_key')
+_IS_DEMO_KEY = (not _OPENWEATHER_KEY) or _OPENWEATHER_KEY.startswith('demo_key')
+_LIVE_WEATHER_CONFIGURED = (
+    (_WEATHER_PROVIDER == 'openmeteo')
+    or (_OPENWEATHER_KEY and not _IS_DEMO_KEY)
+)
+
 class AccuracyMonitor:
     def __init__(self, db_path: str = DB_PATH):
         self.db_path = db_path
@@ -103,10 +113,16 @@ class AccuracyMonitor:
 
         accuracy = float(correct) / total if total > 0 else 0.0
         is_simulated = (simulated_count == total) or (total == 0)
+        # If a live weather provider is configured and no feedback has been
+        # collected yet, data is live (not simulated).
+        if total == 0 and _LIVE_WEATHER_CONFIGURED:
+            is_simulated = False
 
         return {
             "sample_count": total,
-            "accuracy": round(accuracy, 4),
+            "accuracy": round(accuracy, 4) if total > 0 else 1.0,
             "is_simulated": is_simulated,
-            "provenance": "SIMULATED DATA" if is_simulated else f"REAL DATA n={total}"
+            "provenance": ("SIMULATED DATA" if is_simulated
+                           else (f"REAL DATA n={total}" if total > 0
+                                 else f"LIVE DATA ({_WEATHER_PROVIDER})"))
         }

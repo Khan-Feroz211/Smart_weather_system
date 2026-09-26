@@ -1,6 +1,20 @@
 import sys
 import os
 
+# --------------------------------------------------------------------------- #
+# IMPORTANT: Import torch at the very TOP of the module, before ANY other
+# third-party package.  On Windows, numpy/pandas/sklearn/joblib load native
+# DLLs that can conflict with torch's c10.dll (WinError 1114) if torch is
+# imported afterwards.  By importing torch first, we ensure its DLLs are
+# initialised before any other library's native code runs.
+# --------------------------------------------------------------------------- #
+try:
+    import torch  # noqa: F401
+    import torchvision  # noqa: F401
+except Exception:  # pragma: no cover - torch might not be installed at all
+    pass  # plant_disease_model.py handles the graceful fallback
+
+# Remove the now-redundant torch import block that was further down
 # Ensure UTF-8 encoding for stdout/stderr (fixes UnicodeEncodeError on Windows)
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')

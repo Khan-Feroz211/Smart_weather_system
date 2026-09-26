@@ -14,10 +14,10 @@
     "maize_common_rust",
     "maize_healthy"
   ],
-  "best_val_accuracy": 1.0,
+  "best_val_accuracy": 0.4487,
   "epochs": 2,
   "image_size": 224,
   "engine_version": "v1.0-dl",
-  "trained_at": "2026-09-24T22:09:14.939499Z",
+  "trained_at": "2026-09-25T21:48:52.726546Z",
   "torch_version": "2.14.0+cpu"
 }
