@@ -162,12 +162,15 @@
                                         <div>
                                             <small class="text-muted">AI RECOMMENDATION</small>
                                             <div class="fw-bold">
-                                                {% if current_weather.temperature > preferences.temperature_max %}
+                                                {% set temp_max = preferences.get('temperature_max', 30) %}
+                                                {% set temp_min = preferences.get('temperature_min', 15) %}
+                                                {% set prefs = preferences.get('preferred_activities') or [] %}
+                                                {% if current_weather.temperature > temp_max %}
                                                 Stay indoors, temperature is high
-                                                {% elif current_weather.temperature < preferences.temperature_min %}
+                                                {% elif current_weather.temperature < temp_min %}
                                                 Wear warm clothing
                                                 {% else %}
-                                                Perfect weather for {{ preferences.preferred_activities[0] if preferences.preferred_activities else 'outdoor activities' }}
+                                                Perfect weather for {{ prefs[0] if prefs else 'outdoor activities' }}
                                                 {% endif %}
                                             </div>
                                         </div>
@@ -189,41 +192,71 @@
                 <!-- Recent Activities -->
                 <div class="col-md-6">
                     <div class="card-futuristic h-100">
-                        <div class="card-header glass-effect">
+                    <div class="card-header glass-effect d-flex justify-content-between align-items-center">
                             <h5 class="card-title mb-0">
-                                <i class="fas fa-history me-2"></i>Recent Activities
+                                <i class="fas fa-tractor me-2"></i>Recent Farm Activities
                             </h5>
+                            <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal"
+                                    data-bs-target="#logActivityModal">
+                                <i class="fas fa-plus me-1"></i>Log Activity
+                            </button>
                         </div>
                         <div class="card-body">
+                            {% set activity_icons = {
+                                'planting': 'fa-seedling', 'irrigation': 'fa-droplet',
+                                'harvesting': 'fa-wheat-awn', 'harvest': 'fa-wheat-awn',
+                                'disease_scan': 'fa-camera', 'pest_inspection': 'fa-bug',
+                                'soil_testing': 'fa-vial', 'fertilizing': 'fa-leaf',
+                                'weeding': 'fa-leaf', 'weather_check': 'fa-cloud-sun'
+                            } %}
+                            {% set activity_colors = {
+                                'planting': 'bg-success', 'irrigation': 'bg-info',
+                                'harvesting': 'bg-warning text-dark', 'harvest': 'bg-warning text-dark',
+                                'disease_scan': 'bg-primary', 'pest_inspection': 'bg-danger',
+                                'soil_testing': 'bg-secondary', 'fertilizing': 'bg-success',
+                                'weeding': 'bg-success', 'weather_check': 'bg-info'
+                            } %}
                             {% if activities %}
+                                <div class="activity-feed">
                                 {% for activity in activities %}
-                                <div class="d-flex align-items-center border-bottom pb-2 mb-2">
+                                <div class="d-flex align-items-start border-bottom pb-2 mb-2 activity-item">
                                     <div class="flex-shrink-0">
-                                        <div class="bg-success rounded-circle d-flex align-items-center justify-content-center" 
+                                        <div class="rounded-circle d-flex align-items-center justify-content-center {{ activity_colors.get(activity.activity_type, 'bg-secondary') }}"
                                              style="width: 32px; height: 32px;">
-                                            <i class="fas fa-{{ 'running' if activity.activity_type == 'Running' else 'book' if activity.activity_type == 'Reading' else 'biking' }} text-white small"></i>
+                                            <i class="fas {{ activity_icons.get(activity.activity_type, 'fa-history') }} text-white small"></i>
                                         </div>
                                     </div>
                                     <div class="flex-grow-1 ms-3">
-                                        <div class="fw-bold">{{ activity.activity_type }}</div>
-                                        <small class="text-muted">{{ activity.weather_condition }} • {{ activity.duration_minutes }}min</small>
+                                        <div class="fw-bold">{{ activity.activity_type|replace('_', ' ')|title }}</div>
+                                        {% if activity.notes %}
+                                        <small class="text-muted d-block">{{ activity.notes }}</small>
+                                        {% endif %}
+                                        {% if activity.duration_minutes %}
+                                        <small class="text-muted">{{ activity.weather_condition or '—' }} • {{ activity.duration_minutes }}min</small>
+                                        {% else %}
+                                        <small class="text-muted">{{ activity.weather_condition or 'Field activity' }}</small>
+                                        {% endif %}
                                     </div>
                                     <div class="flex-shrink-0 text-end">
-                                        <div class="text-warning">
+                                        {% if activity.satisfaction_rating %}
+                                        <div class="text-warning mb-1">
                                             {% for i in range(activity.satisfaction_rating) %}
-                                            <i class="fas fa-star"></i>
+                                            <i class="fas fa-star fa-xs"></i>
                                             {% endfor %}
                                         </div>
-                                        <small class="text-muted">{{ activity.activity_date[5:16] }}</small>
+                                        {% endif %}
+                                        <small class="text-muted">{{ activity.activity_date[5:16] if activity.activity_date else '—' }}</small>
                                     </div>
                                 </div>
                                 {% endfor %}
+                                </div>
                             {% else %}
                                 <div class="text-center text-muted py-3">
                                     <i class="fas fa-history fa-2x mb-2"></i>
-                                    <p>No activities logged</p>
-                                    <button class="btn btn-futuristic btn-sm">
-                                        <i class="fas fa-plus me-1"></i>Log Activity
+                                    <p>No farming activities logged yet</p>
+                                    <button class="btn btn-futuristic btn-sm" data-bs-toggle="modal"
+                                            data-bs-target="#logActivityModal">
+                                        <i class="fas fa-plus me-1"></i>Log Your First Activity
                                     </button>
                                 </div>
                             {% endif %}
@@ -311,7 +344,108 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Log Farm Activity Form -->
+            <div class="modal fade" id="logActivityModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content card-futuristic">
+                        <div class="modal-header glass-effect">
+                            <h5 class="modal-title">Log Farming Activity</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <form id="logActivityForm" class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Activity Type</label>
+                                    <select class="form-select bg-dark text-light border-secondary" name="activity_type" required>
+                                        <option value="planting">🌱 Planting</option>
+                                        <option value="irrigation">💧 Irrigation</option>
+                                        <option value="fertilizing">🍃 Fertilizing</option>
+                                        <option value="weeding">🌿 Weeding</option>
+                                        <option value="pest_inspection">🐛 Pest Inspection</option>
+                                        <option value="soil_testing">🧪 Soil Testing</option>
+                                        <option value="disease_scan">📷 Disease Scan</option>
+                                        <option value="weather_check">☀️ Weather Check</option>
+                                        <option value="harvesting">🌾 Harvesting</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Duration (minutes)</label>
+                                    <input type="number" class="form-control bg-dark text-light border-secondary"
+                                           name="duration_minutes" min="1" placeholder="e.g. 30">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">Notes</label>
+                                    <textarea class="form-control bg-dark text-light border-secondary"
+                                              name="notes" rows="2"
+                                              placeholder="What did you observe?"></textarea>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">Satisfaction</label>
+                                    <select class="form-select bg-dark text-light border-secondary" name="satisfaction_rating">
+                                        <option value="5">⭐⭐⭐⭐⭐ - Excellent</option>
+                                        <option value="4">⭐⭐⭐⭐ - Good</option>
+                                        <option value="3">⭐⭐⭐ - Fair</option>
+                                        <option value="2">⭐⭐ - Poor</option>
+                                        <option value="1">⭐ - Very Poor</option>
+                                    </select>
+                                </div>
+                                <div class="d-flex justify-content-end">
+                                    <button type="button" class="btn btn-outline-secondary me-2"
+                                            data-bs-dismiss="modal">Cancel</button>
+                                    <button type="submit" class="btn btn-futuristic">Save Activity</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Log farming activity form submission
+const logActivityForm = document.getElementById('logActivityForm');
+if (logActivityForm) {
+    logActivityForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const formData = new FormData(logActivityForm);
+        const payload = {
+            activity_type: formData.get('activity_type'),
+            duration_minutes: formData.get('duration_minutes') ? parseInt(formData.get('duration_minutes')) : null,
+            notes: formData.get('notes') || '',
+            satisfaction_rating: formData.get('satisfaction_rating') ? parseInt(formData.get('satisfaction_rating')) : null,
+            weather_condition: 'Field activity',
+            activity_date: new Date().toISOString()
+        };
+
+        try {
+            const response = await fetch('/api/agri/activity', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+
+            const modalEl = document.getElementById('logActivityModal');
+            if (window.bootstrap && modalEl) {
+                const bsModal = bootstrap.Modal.getInstance(modalEl);
+                if (bsModal) bsModal.hide();
+            }
+
+            if (response.ok) {
+                showNotification('✅ Activity logged!', 'success');
+                setTimeout(() => location.reload(), 1200);
+            } else {
+                showNotification('Error: ' + (data.message || 'Could not log activity'), 'error');
+            }
+        } catch (err) {
+            showNotification('Error: ' + err.message, 'error');
+        }
+    });
+}
+</script>
 {% endblock %}

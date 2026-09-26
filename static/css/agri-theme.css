@@ -418,6 +418,51 @@ body {
     font-weight: 500;
 }
 
+/* Chart containers — fixed height so Chart.js canvases render properly
+   with maintainAspectRatio:false (otherwise they collapse to 0px). */
+.chart-container {
+    position: relative;
+    width: 100%;
+    height: 280px;
+    min-height: 280px;
+}
+
+.chart-container canvas {
+    width: 100% !important;
+    height: 280px !important;
+}
+
+/* Analytics card — capped height so charts don't dominate the page */
+.analytics-card {
+    max-height: 640px;
+    overflow: hidden;
+}
+
+/* Activity feed */
+.activity-feed .activity-item {
+    border-bottom: 1px solid rgba(6, 78, 59, 0.08);
+}
+[data-bs-theme="dark"] .activity-feed .activity-item {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Camera scanner */
+.camera-feed {
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+}
+.camera-feed video {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+#cameraOverlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .dashboard-header {

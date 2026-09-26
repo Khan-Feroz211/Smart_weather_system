@@ -20,7 +20,7 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
 
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session
 from flask_socketio import SocketIO, emit
 import sqlite3
 import json
@@ -1103,7 +1103,9 @@ def init_database():
             INSERT OR IGNORE INTO users (username, email, location, preferences)
             VALUES (?, ?, ?, ?)
         ''', ('farm_owner', 'owner@agri.pk', 'Lahore', json.dumps({
-            'preferred_activities': ['farming', 'irrigation']
+            'preferred_activities': ['farming', 'irrigation'],
+            'temperature_min': 15,
+            'temperature_max': 35,
         })))
         
         # Insert sample weather data for Pakistan cities
@@ -1121,6 +1123,28 @@ def init_database():
                 (location, temperature, humidity, pressure, wind_speed, weather_condition, precipitation)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', weather)
+
+        # Seed farmer activities (farming-focused, not fitness)
+        user_row = cursor.execute('SELECT user_id FROM users WHERE username = ?', ('farm_owner',)).fetchone()
+        if user_row:
+            uid = user_row[0]
+            existing = cursor.execute('SELECT COUNT(*) FROM user_activities WHERE user_id = ?', (uid,)).fetchone()[0]
+            if existing == 0:
+                farm_activities = [
+                    (uid, 'planting',      'Sunny', 45, 5, 'Seeded wheat in North Field – Rabi 2025-26', '2026-05-10 08:30:00'),
+                    (uid, 'irrigation',    'Clear', 20, 4, 'Drip irrigation for South Field – 25mm deficit addressed', '2026-05-10 14:15:00'),
+                    (uid, 'pest_inspection','Clear', 35, 4, 'Inspected Alpha Field for wheat rust – no signs of infection', '2026-05-11 09:00:00'),
+                    (uid, 'disease_scan',  'Clear', 15, 5, 'Scanned leaf samples for early blight detection', '2026-05-11 10:30:00'),
+                    (uid, 'soil_testing',  'Clear', 60, 3, 'Soil pH test in Beta Field – nutrients balanced', '2026-05-12 07:45:00'),
+                    (uid, 'fertilizing',   'Clear', 40, 4, 'Applied nitrogen fertilizer to West Field', '2026-05-12 16:00:00'),
+                ]
+                for act in farm_activities:
+                    cursor.execute('''
+                        INSERT OR IGNORE INTO user_activities
+                        (user_id, activity_type, weather_condition, duration_minutes,
+                         satisfaction_rating, notes, activity_date)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ''', act)
         
         conn.commit()
         print("✅ Database initialized with sample data!")
@@ -2095,6 +2119,38 @@ def agri_dashboard():
         ''').fetchone()
         avg_health = round(avg_health_row[0] or 0, 1)
 
+        # Recent farming activities (farmer's own activities feed)
+        recent_activities = conn.execute('''
+            SELECT activity_type, weather_condition, duration_minutes,
+                   satisfaction_rating, notes, activity_date
+            FROM user_activities
+            ORDER BY activity_date DESC
+            LIMIT 8
+        ''').fetchall()
+        recent_activities = [dict(row) for row in recent_activities]
+
+        # Satellite imagery data (GeoVis + Open-Meteo)
+        satellite_data = None
+        sat_radiation = None
+        try:
+            from geovis_satellite import GeoVisSatelliteAnalyzer
+            analyzer = GeoVisSatelliteAnalyzer()
+            # Use the primary farm location; fall back to Lahore
+            primary_location = farms[0]['location'] if farms and farms[0]['location'] else 'Lahore'
+            satellite_data = analyzer.analyze_site(
+                {'location': primary_location, 'field_name': farms[0]['name'] if farms else 'Farm'},
+                connectivity_state='ONLINE'
+            )
+        except Exception:
+            satellite_data = None
+        try:
+            from openmeteo_integration import fetch_satellite_data
+            primary_location = farms[0]['location'] if farms else 'Lahore'
+            sat_radiation = fetch_satellite_data(primary_location, days=7)
+        except Exception:
+            sat_radiation = None
+
+
         # Convert SQLite rows to plain dicts so Jinja2 `|tojson` works
         # without raising Undefined/NoneType serialization errors.
         health_rows = [dict(row) for row in health_rows]
@@ -2106,10 +2162,24 @@ def agri_dashboard():
                                active_alerts=active_alerts,
                                pending_irrigation=pending_irrigation,
                                high_risks=high_risks, yield_summary=yield_summary,
+                               recent_activities=recent_activities,
+                               satellite_data=satellite_data,
+                               sat_radiation=sat_radiation,
                                avg_health=avg_health, now=datetime.now())
     except Exception as e:
         flash(f'Agriculture dashboard error: {e}', 'error')
-        return render_template('agri_dashboard.html', avg_health=0, now=datetime.now())
+        satellite_data = None
+        from openmeteo_integration import fetch_satellite_data
+        primary_location = 'Lahore'
+        sat_radiation = None
+        return render_template('agri_dashboard.html',
+                               farms=[], total_farms=0, total_fields=0,
+                               health_rows=[], active_alerts=[],
+                               pending_irrigation=[], high_risks=[],
+                               yield_summary=[], recent_activities=[],
+                               satellite_data=satellite_data,
+                               sat_radiation=sat_radiation,
+                               avg_health=0, now=datetime.now())
     finally:
         conn.close()
 
@@ -2339,6 +2409,51 @@ def dismiss_agri_alert(alert_id):
     finally:
         conn.close()
     return redirect(url_for('agri_alerts_view'))
+
+
+@app.route('/api/agri/activity', methods=['POST'])
+def log_agri_activity():
+    """Log a farming activity for the current (or demo) farmer.
+
+    Accepts JSON:
+        { activity_type, notes, duration_minutes, satisfaction_rating,
+          weather_condition, activity_date }
+    Falls back to user_id=1 (farm_owner demo) when no session user is set.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    if not data.get('activity_type'):
+        return jsonify({"error": "Bad Request", "message": "'activity_type' is required"}), 400
+
+    user_id = session.get('user_id', 1)  # demo fallback
+
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            '''INSERT INTO user_activities
+               (user_id, activity_type, weather_condition, duration_minutes,
+                satisfaction_rating, notes, activity_date)
+               VALUES (?, ?, ?, ?, ?, ?, ?)''',
+            (
+                user_id,
+                data.get('activity_type', 'other'),
+                data.get('weather_condition', 'Field activity'),
+                data.get('duration_minutes') or None,
+                data.get('satisfaction_rating') or None,
+                data.get('notes', ''),
+                data.get('activity_date') or datetime.now().isoformat(),
+            )
+        )
+        conn.commit()
+        return jsonify({
+            "status": "success",
+            "message": "Farming activity logged successfully.",
+            "activity_type": data.get('activity_type'),
+        })
+    except Exception as e:
+        logger.error(f"Failed to log activity: {e}")
+        return jsonify({"error": "Internal Error", "message": str(e)}), 500
+    finally:
+        conn.close()
 
 
 @app.route('/fields/<int:field_id>/refresh', methods=['POST'])

@@ -9,7 +9,7 @@
       <h1 class="display-5 fw-bold text-glow mb-2">
         <i class="fas fa-camera me-2"></i>Plant Disease Scanner
       </h1>
-      <p class="text-muted">Upload a photo of your plant or leaves and the AI (ResNet-18 CNN) will detect potential diseases. You can also use the symptom-based checker below.</p>
+      <p class="text-muted">Upload a photo of your plant or leaves, or use your device camera for live capture, and the AI (ResNet-18 CNN) will detect potential diseases. You can also use the symptom-based checker below.</p>
     </div>
     <div class="col-auto">
       <div class="ai-status {% if dl_available %}trained{% else %}warning{% endif %}">
@@ -63,13 +63,51 @@
             </div>
           </div>
 
-          <!-- Upload Zone -->
-          <div class="border-2 border-dashed rounded-3 p-4 text-center"
-               id="uploadZone" style="border-color: #0d9481; cursor: pointer;">
-            <i class="fas fa-cloud-upload-alt fa-3x text-teal mb-3"></i>
-            <h6 class="mb-1">Click to upload or drag &amp; drop</h6>
-            <p class="text-muted small mb-0">PNG, JPG, JPEG — max 2 MB</p>
-            <input type="file" id="imageInput" accept="image/*" style="display:none;">
+          <!-- Mode Toggle: Upload vs Camera -->
+          <div class="d-flex justify-content-center mb-3" role="tablist">
+            <button type="button" class="btn btn-outline-secondary btn-sm active"
+                    id="uploadTab" data-mode="upload"
+                    onclick="switchScannerMode('upload')">
+              <i class="fas fa-upload me-1"></i>Upload Photo
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm ms-2"
+                    id="cameraTab" data-mode="camera"
+                    onclick="switchScannerMode('camera')">
+              <i class="fas fa-camera me-1"></i>Use Camera
+            </button>
+          </div>
+
+          <!-- Upload Zone (file mode) -->
+          <div id="uploadMode">
+            <div class="border-2 border-dashed rounded-3 p-4 text-center"
+                 id="uploadZone" style="border-color: #0d9481; cursor: pointer;">
+              <i class="fas fa-cloud-upload-alt fa-3x text-teal mb-3"></i>
+              <h6 class="mb-1">Click to upload or drag &amp; drop</h6>
+              <p class="text-muted small mb-0">PNG, JPG, JPEG — max 2 MB</p>
+              <input type="file" id="imageInput" accept="image/*" style="display:none;">
+            </div>
+          </div>
+
+          <!-- Camera Capture Mode -->
+          <div id="cameraMode" class="camera-feed-wrapper" style="display:none;">
+            <div class="position-relative camera-feed mb-3">
+              <video id="cameraPreview" autoplay playsinline></video>
+              <div id="cameraOverlay">
+                <div class="position-absolute top-50 start-50 translate-middle text-white text-center">
+                  <div class="border border-white rounded"
+                       style="width:240px;height:240px;box-sizing:border-box;"></div>
+                  <small class="d-block mt-2">Position leaf inside the frame</small>
+                </div>
+              </div>
+            </div>
+            <div class="d-grid gap-2">
+              <button class="btn btn-teal btn-lg" id="captureBtn" onclick="capturePhoto()">
+                <i class="fas fa-camera-retro me-2"></i>Capture Photo
+              </button>
+              <button class="btn btn-outline-secondary" id="cancelCameraBtn" onclick="stopCamera()">
+                <i class="fas fa-times me-1"></i>Cancel Camera
+              </button>
+            </div>
           </div>
 
           <!-- Image Preview -->
@@ -201,6 +239,96 @@ const imagePreview = document.getElementById('imagePreview');
 const scanBtn = document.getElementById('scanBtn');
 let selectedFile = null;
 
+// --- Camera capture state ---
+let cameraStream = null;
+const cameraPreview = document.getElementById('cameraPreview');
+const cameraMode = document.getElementById('cameraMode');
+const uploadMode = document.getElementById('uploadMode');
+const uploadTab = document.getElementById('uploadTab');
+const cameraTab = document.getElementById('cameraTab');
+
+function switchScannerMode(mode) {
+    if (mode === 'camera') {
+        uploadTab.classList.remove('active');
+        cameraTab.classList.add('active');
+        uploadMode.style.display = 'none';
+        cameraMode.style.display = 'block';
+        startCamera();
+    } else {
+        cameraTab.classList.remove('active');
+        uploadTab.classList.add('active');
+        cameraMode.style.display = 'none';
+        uploadMode.style.display = 'block';
+        stopCamera();
+    }
+}
+
+async function startCamera() {
+    if (!cameraPreview) return;
+    try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: 'environment' } }
+        });
+        cameraPreview.srcObject = cameraStream;
+        showNotification('📷 Camera ready — position the leaf and capture', 'success');
+    } catch (err) {
+        console.error('Camera access error:', err);
+        showNotification('Camera access denied or unavailable. Please use Upload instead.', 'error');
+        switchScannerMode('upload');
+    }
+}
+
+function stopCamera() {
+    if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+    }
+    if (cameraPreview) cameraPreview.srcObject = null;
+}
+
+async function capturePhoto() {
+    if (!cameraPreview || !cameraPreview.srcObject) {
+        showNotification('Camera not active. Click “Use Camera” first.', 'error');
+        return;
+    }
+
+    // Draw current video frame to an off-screen canvas
+    const video = cameraPreview;
+    const canvas = document.createElement('canvas');
+    // Use the video's intrinsic dimensions (or a sensible default)
+    const w = video.videoWidth || 640;
+    const h = video.videoHeight || 480;
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+
+    // Draw video frame, then overlay a quick capture flash effect
+    ctx.drawImage(video, 0, 0, w, h);
+
+    // Convert to JPEG blob (good compression for plant photos)
+    canvas.toBlob(async function(blob) {
+        if (!blob) {
+            showNotification('Failed to capture photo. Try again.', 'error');
+            return;
+        }
+        // Build a File object so the existing handleFile() flow works unchanged
+        const file = new File([blob], 'camera-capture.jpg', {
+            type: 'image/jpeg',
+            lastModified: Date.now()
+        });
+
+        // Brief visual feedback
+        if (video.parentElement) {
+            video.parentElement.classList.add('border', 'border-success');
+            setTimeout(() => video.parentElement.classList.remove('border', 'border-success'), 600);
+        }
+
+        handleFile(file);
+        // Switch back to upload mode so the user sees the preview + scan button
+        switchScannerMode('upload');
+    }, 'image/jpeg', 0.85);
+}
+
 // Click to open file picker
 uploadZone.addEventListener('click', () => imageInput.click());
 
@@ -262,6 +390,28 @@ function renderConfidenceBar(conf, label) {
         </div>`;
 }
 
+// Fire-and-forget: log a farming activity to the backend
+async function logActivity(activityType, notes) {
+    try {
+        const crop = document.getElementById('cropSelect') ? document.getElementById('cropSelect').value : 'wheat';
+        await fetch('/api/agri/activity', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                activity_type: activityType,
+                notes: notes || '',
+                duration_minutes: null,
+                satisfaction_rating: null,
+                weather_condition: 'Field activity',
+                activity_date: new Date().toISOString()
+            })
+        });
+    } catch (err) {
+        // Silently ignore — activity logging is best-effort
+        console.debug('Activity log skipped:', err.message);
+    }
+}
+
 async function scanImage() {
     if (!selectedFile) {
         showNotification('Please upload an image first.', 'error');
@@ -295,6 +445,9 @@ async function scanImage() {
 
         renderResults(data);
         runCombinedRecommendation(data);
+
+        // Record this as a farming activity (fire-and-forget)
+        logActivity('disease_scan', `Scanned ${crop} leaf image for disease — top prediction: ${(data.predictions||data.diagnoses||[]).length} result(s)`);
     } catch (err) {
         showNotification('Error scanning image: ' + err.message, 'error');
         resultsContent.innerHTML = '<div class="alert alert-danger"><i class="fas fa-times me-1"></i>' +
@@ -504,6 +657,10 @@ async function runSymptomDiagnosis() {
         }
         html += '</div></div>';
         resultsContent.innerHTML = html;
+
+        // Log this as a pest inspection activity (fire-and-forget)
+        const scount = (data.diagnoses || []).length;
+        logActivity('pest_inspection', `Symptom-based diagnosis for ${crop} — ${scount} possible condition(s) found`);
     } catch (err) {
         showNotification('Error: ' + err.message, 'error');
     }
@@ -515,6 +672,7 @@ function resetScanner() {
     previewContainer.style.display = 'none';
     imagePreview.src = '';
     scanBtn.disabled = true;
+    stopCamera();
     const resultsContent = document.getElementById('resultsContent');
     resultsContent.innerHTML = '<div class="text-muted text-center py-4"><i class="fas fa-mobile-screen-var fa-2x mb-2"></i><p class="mb-0">Upload an image or enter symptoms to get diagnosis results.</p></div>';
 }

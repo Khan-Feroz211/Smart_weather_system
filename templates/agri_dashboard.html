@@ -81,6 +81,114 @@
     </div>
   </div>
 
+  <!-- Satellite Imagery Data -->
+  <div class="row g-4 mb-4" id="satelliteSection">
+    {% if satellite_data and satellite_data.available %}
+      <div class="col-lg-12">
+        <div class="card agri-theme-card h-100">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">
+              <i class="fas fa-satellite me-2 text-primary"></i>
+              Satellite Imagery — GeoVis Engine
+            </h5>
+            <span class="badge bg-info">{{ satellite_data.status }}</span>
+          </div>
+          <div class="card-body">
+            <div class="row g-4 text-center">
+              <div class="col-4">
+                <div class="p-3">
+                  <div class="fw-bold display-6 text-teal">
+                    {{ "%.2f"|format(satellite_data.data.ndvi) if satellite_data.data and satellite_data.data.ndvi else '–' }}
+                  </div>
+                  <small class="text-muted text-uppercase">NDVI</small>
+                  <div class="progress mt-2" style="height:6px;">
+                    <div class="bg-teal" style="width:{% if satellite_data.data and satellite_data.data.ndvi %}{{ (satellite_data.data.ndvi / 1.0 * 100)|round(0) }}%{% else %}0%{% endif %};"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-4">
+                <div class="p-3">
+                  <div class="fw-bold display-6 text-info">
+                    {{ "%.1f%%"|format((satellite_data.data.soil_moisture_index * 100)|round(1)) if satellite_data.data and satellite_data.data.soil_moisture_index else '–' }}
+                  </div>
+                  <small class="text-muted text-uppercase">Soil Moisture Index</small>
+                  <div class="progress mt-2" style="height:6px;">
+                    <div class="bg-info" style="width:{% if satellite_data.data and satellite_data.data.soil_moisture_index %}{{ (satellite_data.data.soil_moisture_index * 100)|round(0) }}%{% else %}0%{% endif %};"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-4">
+                <div class="p-3">
+                  <div class="fw-bold display-6 {% if satellite_data.data.canopy_stress == 'high_solar_load' %}text-danger{% elif satellite_data.data.canopy_stress == 'low' %}text-teal{% else %}text-warning{% endif %}">
+                    {{ satellite_data.data.canopy_stress|replace('_', ' ')|title if satellite_data.data and satellite_data.data.canopy_stress else '–' }}
+                  </div>
+                  <small class="text-muted text-uppercase">Canopy Stress</small>
+                </div>
+              </div>
+            </div>
+
+            {% if sat_radiation and sat_radiation.get('available') %}
+              <div class="row g-4 mt-3 pt-3 border-top">
+                <div class="col-12">
+                  <h6 class="mb-2 text-muted small fw-bold text-uppercase">
+                    Radiation Data (Open-Meteo)
+                  </h6>
+                  <div class="row g-3 text-center">
+                    <div class="col-4">
+                      <div class="fw-bold text-warning">
+                        {{ sat_radiation.summary.mean_shortwave_radiation if sat_radiation.summary else '–' }}
+                      </div>
+                      <small class="text-muted">Mean SW Radiation (W/m²)</small>
+                    </div>
+                    <div class="col-4">
+                      <div class="fw-bold text-primary">
+                        {{ sat_radiation.summary.mean_clear_sky_radiation if sat_radiation.summary else '–' }}
+                      </div>
+                      <small class="text-muted">Clear-Sky SW Radiation (W/m²)</small>
+                    </div>
+                    <div class="col-4">
+                      <div class="fw-bold text-info">
+                        {{ sat_radiation.summary.data_points if sat_radiation.summary else '–' }}
+                      </div>
+                      <small class="text-muted">Data Points (7-day)</small>
+                    </div>
+                  </div>
+                  {% if sat_radiation.get('attribution') %}
+                    <div class="mt-2">
+                      <small class="text-muted fst-italic">{{ sat_radiation.attribution }}</small>
+                    </div>
+                  {% endif %}
+                </div>
+              </div>
+            {% endif %}
+
+            <div class="mt-3">
+              <small class="text-muted fst-italic">
+                <i class="fas fa-info-circle me-1"></i>
+                {{ satellite_data.disclaimer if satellite_data.disclaimer else 'Satellite data provided by Geovis Engine.' }}
+              </small>
+            </div>
+          </div>
+        </div>
+      </div>
+    {% else %}
+      <div class="col-lg-12">
+        <div class="card agri-theme-card h-100">
+          <div class="card-header">
+            <h5 class="mb-0">
+              <i class="fas fa-satellite me-2 text-muted"></i>
+              Satellite Imagery
+            </h5>
+          </div>
+          <div class="card-body text-center py-4">
+            <i class="fas fa-cloud-slash fa-2x text-muted mb-2"></i>
+            <p class="text-muted mb-0">Satellite data unavailable — operating in offline/cached mode.</p>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+
   <div class="row g-4">
 
     <!-- Field Health Overview -->
@@ -299,22 +407,84 @@
     </div>
 
     <!-- Analytics Charts -->
-    <div class="col-lg-12 mt-4">
-      <div class="card">
-        <div class="card-header">
+    <div class="col-lg-10 mt-4 mx-auto mx-lg-0">
+      <div class="card analytics-card">
+        <div class="card-header d-flex justify-content-between align-items-center">
           <h5 class="mb-0"><i class="fas fa-chart-line me-2 text-primary"></i>Analytics Overview</h5>
+          <small class="text-muted">Last updated {{ now.strftime('%H:%M') if now else '—' }}</small>
         </div>
         <div class="card-body">
-          <div class="row">
-            <div class="col-md-6 mb-4">
-              <h6 class="mb-3">Crop Health Trends</h6>
-              <canvas id="healthChart" height="200"></canvas>
+          <div class="row g-4">
+            <div class="col-md-6">
+              <h6 class="mb-2 text-muted small fw-bold text-uppercase">Crop Health by Field</h6>
+              <div class="chart-container">
+                <canvas id="healthChart"></canvas>
+              </div>
             </div>
-            <div class="col-md-6 mb-4">
-              <h6 class="mb-3">Yield Forecasts by Field</h6>
-              <canvas id="yieldChart" height="200"></canvas>
+            <div class="col-md-6">
+              <h6 class="mb-2 text-muted small fw-bold text-uppercase">Yield Forecast vs Target</h6>
+              <div class="chart-container">
+                <canvas id="yieldChart"></canvas>
+              </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Farm Activities -->
+    <div class="col-lg-12 mt-4">
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0"><i class="fas fa-tractor me-2 text-primary"></i>Recent Farm Activities</h5>
+          <a href="{{ url_for('user_profile', user_id=1) }}" class="btn btn-sm btn-outline-secondary">View Profile</a>
+        </div>
+        <div class="card-body p-0" style="max-height:320px;overflow-y:auto;">
+          {% set activity_icons = {
+            'planting': 'fa-seedling', 'irrigation': 'fa-droplet',
+            'harvesting': 'fa-wheat-awn', 'harvest': 'fa-wheat-awn',
+            'disease_scan': 'fa-camera', 'pest_inspection': 'fa-bug',
+            'soil_testing': 'fa-vial', 'fertilizing': 'fa-leaf',
+            'weeding': 'fa-leaf', 'weather_check': 'fa-cloud-sun'
+          } %}
+          {% set activity_colors = {
+            'planting': 'bg-success', 'irrigation': 'bg-info',
+            'harvesting': 'bg-warning text-dark', 'harvest': 'bg-warning text-dark',
+            'disease_scan': 'bg-primary', 'pest_inspection': 'bg-danger',
+            'soil_testing': 'bg-secondary', 'fertilizing': 'bg-success',
+            'weeding': 'bg-success', 'weather_check': 'bg-info'
+          } %}
+          {% if recent_activities %}
+            <ul class="list-group list-group-flush activity-feed">
+              {% for activity in recent_activities %}
+              <li class="list-group-item d-flex align-items-start py-2 border-0 border-bottom">
+                <div class="flex-shrink-0">
+                  <div class="rounded-circle d-flex align-items-center justify-content-center {{ activity_colors.get(activity.activity_type, 'bg-secondary') }}"
+                       style="width:32px;height:32px;">
+                    <i class="fas {{ activity_icons.get(activity.activity_type, 'fa-history') }} text-white small"></i>
+                  </div>
+                </div>
+                <div class="flex-grow-1 ms-3">
+                  <div class="fw-bold small">{{ activity.activity_type|replace('_', ' ')|title }}</div>
+                  {% if activity.notes %}
+                  <small class="text-muted d-block">{{ activity.notes }}</small>
+                  {% else %}
+                  <small class="text-muted">{{ activity.weather_condition or 'Field activity' }}</small>
+                  {% endif %}
+                </div>
+                <div class="flex-shrink-0 text-end">
+                  <small class="text-muted">{{ activity.activity_date[5:16] if activity.activity_date else '—' }}</small>
+                </div>
+              </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="text-center text-muted py-4">
+              <i class="fas fa-history fa-2x mb-2"></i>
+              <p class="mb-0 small">No farming activities logged yet.</p>
+              <p class="small">Activities logged from the Disease Scanner, Irrigation tracker, and profile will appear here.</p>
+            </div>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -325,57 +495,93 @@
 <script>
 // Analytics Charts
 document.addEventListener('DOMContentLoaded', function() {
-    // Crop Health Chart
+    // Read CSS variables once so Chart.js uses the correct theme colours
+    const _style = getComputedStyle(document.documentElement);
+    const _c = (name) => _style.getPropertyValue(name).trim() || '#64748b';
+    const COLORS = {
+        success:   _c('--color-success'),
+        warning:   _c('--color-warning'),
+        danger:    _c('--color-danger'),
+        teal:      _c('--color-teal'),
+        primary:   _c('--color-primary'),
+        textMuted: _c('--color-text-muted'),
+        surface:   _c('--color-surface'),
+    };
+    const tooltipBg = 'rgba(6,78,59,0.9)';
+    const gridColor = 'rgba(0,0,0,0.05)';
+
+    // ---- Crop Health Chart ----
     const healthCtx = document.getElementById('healthChart');
     if (healthCtx) {
         const healthData = {{ health_rows|tojson }};
         const fieldNames = healthData.map(r => r.name);
         const healthScores = healthData.map(r => r.health_score || 0);
-        
+
         new Chart(healthCtx, {
             type: 'bar',
             data: {
                 labels: fieldNames,
                 datasets: [{
-                    label: 'Crop Health Score',
+                    label: 'Health Score (%)',
                     data: healthScores,
-                    backgroundColor: healthScores.map(score => 
-                        score >= 75 ? '#22c55e' : score >= 50 ? '#D97706' : '#ef4444'
+                    backgroundColor: healthScores.map(score =>
+                        score >= 75 ? COLORS.success : score >= 50 ? COLORS.warning : COLORS.danger
                     ),
-                    borderRadius: 8
+                    borderColor: '#ffffff',
+                    borderWidth: 1,
+                    borderRadius: { topLeft: 6, topRight: 6, bottomLeft: 6, bottomRight: 6 },
+                    barThickness: 28,
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: {
-                        display: false
-                    }
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: tooltipBg,
+                        borderColor: COLORS.teal,
+                        padding: 8,
+                        callbacks: {
+                            label: ctx => `${ctx.dataset.label}: ${ctx.formattedValue}%`
+                        }
+                    },
+                    datalabels: { display: false }
                 },
                 scales: {
                     y: {
                         beginAtZero: true,
                         max: 100,
+                        grid: { drawBorder: false, color: gridColor },
                         ticks: {
-                            callback: function(value) {
-                                return value + '%';
-                            }
+                            callback: function(value) { return value + '%'; },
+                            color: COLORS.textMuted,
+                            font: { size: 11 }
+                        }
+                    },
+                    x: {
+                        grid: { display: false },
+                        ticks: {
+                            color: COLORS.textMuted,
+                            font: { size: 11 },
+                            maxRotation: 30,
+                            minRotation: 30
                         }
                     }
-                }
+                },
+                animation: { duration: 800, easing: 'easeOutQuart' }
             }
         });
     }
-    
-    // Yield Forecast Chart
+
+    // ---- Yield Forecast Chart ----
     const yieldCtx = document.getElementById('yieldChart');
     if (yieldCtx) {
         const yieldData = {{ yield_summary|tojson }};
         const fieldNames = yieldData.map(y => y.field_name);
         const expectedYields = yieldData.map(y => y.expected_yield_ton_ha);
         const targetYields = yieldData.map(y => y.target_yield_ton_ha);
-        
+
         new Chart(yieldCtx, {
             type: 'bar',
             data: {
@@ -384,14 +590,20 @@ document.addEventListener('DOMContentLoaded', function() {
                     {
                         label: 'Expected Yield',
                         data: expectedYields,
-                        backgroundColor: '#0d9488',
-                        borderRadius: 8
+                        backgroundColor: COLORS.teal,
+                        borderColor: '#ffffff',
+                        borderWidth: 1,
+                        borderRadius: { topLeft: 4, topRight: 0, bottomLeft: 4, bottomRight: 0 },
+                        barPercentage: 0.55
                     },
                     {
                         label: 'Target Yield',
                         data: targetYields,
-                        backgroundColor: '#064E3B',
-                        borderRadius: 8
+                        backgroundColor: COLORS.primary,
+                        borderColor: '#ffffff',
+                        borderWidth: 1,
+                        borderRadius: { topLeft: 0, topRight: 4, bottomLeft: 0, bottomRight: 4 },
+                        barPercentage: 0.55
                     }
                 ]
             },
@@ -399,20 +611,37 @@ document.addEventListener('DOMContentLoaded', function() {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: {
-                        position: 'top'
+                    legend: { position: 'top', labels: { color: COLORS.textMuted, font: { size: 12 } } },
+                    tooltip: {
+                        backgroundColor: tooltipBg,
+                        borderColor: COLORS.teal,
+                        padding: 8,
+                        callbacks: {
+                            label: ctx => `${ctx.dataset.label}: ${ctx.formattedValue} t/ha`
+                        }
                     }
                 },
                 scales: {
                     y: {
                         beginAtZero: true,
+                        grid: { drawBorder: false, color: gridColor },
                         ticks: {
-                            callback: function(value) {
-                                return value + ' t/ha';
-                            }
+                            callback: function(value) { return value + ' t/ha'; },
+                            color: COLORS.textMuted,
+                            font: { size: 11 }
+                        }
+                    },
+                    x: {
+                        grid: { display: false },
+                        ticks: {
+                            color: COLORS.textMuted,
+                            font: { size: 11 },
+                            maxRotation: 30,
+                            minRotation: 30
                         }
                     }
-                }
+                },
+                animation: { duration: 800, easing: 'easeOutQuart' }
             }
         });
     }
