@@ -37,12 +37,24 @@
         <a href="{{ url_for('add_farm') }}" class="btn btn-primary">
           <i class="fas fa-plus me-1"></i> Add Farm
         </a>
+        <a href="{{ url_for('satellite_map') }}" class="btn btn-outline-primary">
+          <i class="fas fa-satellite me-1"></i> Satellite Map
+        </a>
         <a href="{{ url_for('agri_alerts_view') }}" class="btn btn-secondary">
           <i class="fas fa-bell me-1"></i> Alerts
         </a>
         <a href="{{ url_for('farms_list') }}" class="btn btn-outline-primary">
           <i class="fas fa-tractor me-1"></i> View All Farms
         </a>
+        {% if notifications_sent > 0 %}
+          <a href="#" class="btn btn-success ms-auto" id="notifyBadge">
+            <i class="fas fa-sms me-1"></i> Alert: {{ notifications_sent }} SMS/WhatsApp sent
+          </a>
+        {% else %}
+          <span class="badge bg-secondary ms-auto" id="notifyStatus">
+            <i class="fas fa-wifi me-1"></i> Notifications: Auto-alert on high-risk
+          </span>
+        {% endif %}
       </div>
     </div>
   </div>

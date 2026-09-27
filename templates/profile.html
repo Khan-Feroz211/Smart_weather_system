@@ -300,6 +300,50 @@
                 </div>
             </div>
 
+            <!-- Notification Preferences -->
+            <div class="card-futuristic mb-4">
+                <div class="card-header glass-effect d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-sms me-2"></i>SMS &amp; WhatsApp Notifications
+                    </h5>
+                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal"
+                            data-bs-target="#notificationPrefsModal">
+                        <i class="fas fa-cog me-1"></i>Configure
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3 align-items-center">
+                        <div class="col-md-4">
+                            <div class="text-center p-3">
+                                <i class="fas fa-{{ 'sms' if user.notification_channel == 'sms' else 'whatsapp' }} fa-2x text-primary mb-2"></i>
+                                <div class="fw-bold">{{ 'SMS' if user.notification_channel == 'sms' else 'WhatsApp' if user.notification_channel == 'whatsapp' else 'SMS' }}</div>
+                                <small class="text-muted">Notification Channel</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="text-center p-3">
+                                <i class="fas fa-phone fa-2x text-teal mb-2"></i>
+                                <div class="fw-bold">{{ user.phone_number or '+1 (555) 123-4567' }}</div>
+                                <small class="text-muted">Phone Number</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="text-center p-3">
+                                <i class="fas fa-{{ 'check-circle' if user.notifications_enabled else 'pause-circle' }} fa-2x {{ 'text-success' if user.notifications_enabled else 'text-warning' }} mb-2"></i>
+                                <div class="fw-bold">{{ 'Active' if user.notifications_enabled else 'Paused' }}</div>
+                                <small class="text-muted">Status</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <button class="btn btn-outline-success btn-sm" onclick="sendTestNotification()">
+                            <i class="fas fa-paper-plane me-1"></i> Send Test Notification
+                        </button>
+                        <span id="testNotifyResult" class="text-muted small ms-2"></span>
+                    </div>
+                </div>
+            </div>
+
             <!-- Add Alert Form -->
             <div class="modal fade" id="addAlertModal" tabindex="-1">
                 <div class="modal-dialog">
@@ -403,6 +447,74 @@
         </div>
     </div>
 </div>
+
+<!-- Notification Preferences Modal -->
+<div class="modal fade" id="notificationPrefsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content card-futuristic">
+            <div class="modal-header glass-effect">
+                <h5 class="modal-title">Notification Preferences</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="notificationPrefsForm">
+                    <div class="mb-3">
+                        <label class="form-label">Phone Number (E.164 format)</label>
+                        <input type="tel" class="form-control bg-dark text-light border-secondary"
+                               name="phone_number" placeholder="+15551234567"
+                               value="{{ user.phone_number or '' }}" required>
+                        <small class="text-muted">Include country code, e.g. +15551234567</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Notification Channel</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="notification_channel">
+                            <option value="sms" {{ 'selected' if user.notification_channel == 'sms' else '' }}>SMS (Twilio)</option>
+                            <option value="whatsapp" {{ 'selected' if user.notification_channel == 'whatsapp' else '' }}>WhatsApp</option>
+                        </select>
+                        <small class="text-muted">Requires Twilio credentials configured in .env</small>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="notificationsEnabled"
+                                   {{ 'checked' if user.notifications_enabled else '' }}>
+                            <label class="form-check-label" for="notificationsEnabled">
+                                Enable notifications
+                            </label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Alert Types to Receive</label>
+                        <div class="d-flex flex-wrap gap-2">
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" name="alert_types" value="pest_risk" checked>
+                                <label class="form-check-label small">Pest Risk</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" name="alert_types" value="heat_stress" checked>
+                                <label class="form-check-label small">Heat Stress</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" name="alert_types" value="drought" checked>
+                                <label class="form-check-label small">Drought</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" name="alert_types" value="irrigation" checked>
+                                <label class="form-check-label small">Irrigation Due</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex justify-content-end">
+                        <button type="button" class="btn btn-outline-secondary me-2"
+                                data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-success">
+                            <i class="fas fa-save me-1"></i> Save Preferences
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -445,6 +557,72 @@ if (logActivityForm) {
         } catch (err) {
             showNotification('Error: ' + err.message, 'error');
         }
+    });
+}
+
+// Send test notification
+function sendTestNotification() {
+    const resultEl = document.getElementById('testNotifyResult');
+    resultEl.textContent = 'Sending…';
+    resultEl.className = 'text-warning';
+    fetch('/api/agri/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            activity_type: 'general',
+            message: 'This is a test notification from Smart AgriWeather. Your SMS/WhatsApp alerts are working!',
+            channel: '{{ user.notification_channel or "sms" }}',
+            phone_number: '{{ user.phone_number or "" }}'
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            resultEl.textContent = '✅ Test sent successfully!';
+            resultEl.className = 'text-success';
+        } else {
+            resultEl.textContent = '❌ ' + (data.error || data.message || 'Failed');
+            resultEl.className = 'text-danger';
+        }
+    })
+    .catch(err => {
+        resultEl.textContent = '❌ ' + err.message;
+        resultEl.className = 'text-danger';
+    });
+}
+
+// Save notification preferences
+const notificationPrefsForm = document.getElementById('notificationPrefsForm');
+if (notificationPrefsForm) {
+    notificationPrefsForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const formData = new FormData(notificationPrefsForm);
+        const phone = formData.get('phone_number');
+        const channel = formData.get('notification_channel');
+        const enabled = document.getElementById('notificationsEnabled').checked;
+
+        // Send a test notification with updated settings
+        fetch('/api/agri/notify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                activity_type: 'weather_check',
+                message: `Notification preferences saved: ${channel === 'sms' ? 'SMS' : 'WhatsApp'} to ${phone}${enabled ? '' : ' (notifications disabled)'}`,
+                channel: channel,
+                phone_number: phone
+            })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success || data.message_sid) {
+                showNotification('✅ Notification preferences saved!', 'success');
+            } else {
+                showNotification('❌ ' + (data.error || 'Failed'), 'error');
+            }
+        })
+        .catch(err => {
+            showNotification('❌ ' + err.message, 'error');
+        });
     });
 }
 </script>

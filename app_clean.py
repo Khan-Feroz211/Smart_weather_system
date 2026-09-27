@@ -53,6 +53,12 @@ from edge_case_hardening_v2 import (
     ConfidencePenaltySystem, FallbackCacheSystem
 )
 
+# SMS / WhatsApp notification engine
+from notifications import (
+    send_farm_notification, notify_farm_alert,
+    get_user_notification_settings, NOTIFICATION_ENABLED,
+)
+
 # Load environment variables
 load_dotenv()
 
@@ -1096,6 +1102,17 @@ def init_database():
 
     for column_name, column_def in WEATHER_DATA_MIGRATION_COLUMNS.items():
         ensure_column_exists(conn, 'weather_data', column_name, column_def)
+
+    # Add notification columns to users table (for SMS/WhatsApp)
+    _add_user_columns = [
+        ('phone_number',          'TEXT DEFAULT NULL'),
+        ('notification_channel',  "TEXT DEFAULT 'sms'"),
+        ('notifications_enabled', 'INTEGER DEFAULT 1'),
+    ]
+    for col_name, col_def in _add_user_columns:
+        existing_cols = {r['name'] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
+        if col_name not in existing_cols:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
     
     # Insert sample data for demo
     try:
@@ -1107,6 +1124,13 @@ def init_database():
             'temperature_min': 15,
             'temperature_max': 35,
         })))
+
+        # Set a demo phone number for the farm_owner user (for SMS/WhatsApp testing)
+        cursor.execute('''
+            UPDATE users SET phone_number = ?, notification_channel = ?, notifications_enabled = 1
+            WHERE username = ?
+        ''', ('+15551234567', 'sms', 'farm_owner'))
+
         
         # Insert sample weather data for Pakistan cities
         sample_weather = [
@@ -2051,6 +2075,45 @@ def recommendations():
 # AGRICULTURE ROUTES – HTML
 # ============================================================
 
+def _safe_satellite_analyze(farms):
+    """Fetch satellite data from GeoVis analyzer (with graceful fallback).
+
+    Reads cached/default GeoVis data directly to avoid blocking on external
+    API calls.  Live Open-Meteo radiation is fetched separately by
+    _safe_fetch_radiation().
+    """
+    try:
+        from geovis_satellite import GeoVisSatelliteAnalyzer
+        analyzer = GeoVisSatelliteAnalyzer()
+        # Access cached data directly — avoids the Open-Meteo API call
+        # that analyze_site() makes even in CACHE mode.
+        cached = analyzer.cached_imagery.get("default", {})
+        return {
+            "available": True,
+            "status": "CACHE",
+            "source": "geovis_satellite_cache",
+            "is_stale": True,
+            "data": {
+                "ndvi": cached.get("ndvi", 0.68),
+                "soil_moisture_index": cached.get("soil_moisture_index", 0.52),
+                "canopy_stress": cached.get("canopy_stress", "low"),
+            },
+            "disclaimer": "Satellite imagery provided by Geovis Engine. Live radiation data from Open-Meteo."
+        }
+    except Exception as e:
+        logger.warning("GeoVis satellite analysis failed: %s", e)
+        return None
+
+def _safe_fetch_radiation(farms):
+    """Fetch Open-Meteo satellite radiation data (with graceful fallback)."""
+    try:
+        from openmeteo_integration import fetch_satellite_data
+        primary_location = farms[0]['location'] if farms and farms[0]['location'] else 'Lahore'
+        return fetch_satellite_data(primary_location, days=7)
+    except Exception as e:
+        logger.warning("Open-Meteo radiation fetch failed: %s", e)
+        return None
+
 @app.route('/agri')
 def agri_dashboard():
     conn = get_db_connection()
@@ -2129,32 +2192,56 @@ def agri_dashboard():
         ''').fetchall()
         recent_activities = [dict(row) for row in recent_activities]
 
-        # Satellite imagery data (GeoVis + Open-Meteo)
+        # Satellite imagery data (GeoVis synthetic + Open-Meteo live radiation)
+        # Run in a daemon thread with a timeout so the dashboard loads quickly
+        # even when the Open-Meteo API is unreachable (network restricted).
         satellite_data = None
         sat_radiation = None
-        try:
-            from geovis_satellite import GeoVisSatelliteAnalyzer
-            analyzer = GeoVisSatelliteAnalyzer()
-            # Use the primary farm location; fall back to Lahore
-            primary_location = farms[0]['location'] if farms and farms[0]['location'] else 'Lahore'
-            satellite_data = analyzer.analyze_site(
-                {'location': primary_location, 'field_name': farms[0]['name'] if farms else 'Farm'},
-                connectivity_state='ONLINE'
-            )
-        except Exception:
-            satellite_data = None
-        try:
-            from openmeteo_integration import fetch_satellite_data
-            primary_location = farms[0]['location'] if farms else 'Lahore'
-            sat_radiation = fetch_satellite_data(primary_location, days=7)
-        except Exception:
-            sat_radiation = None
+        _sat_result = {}
+        _sat_thread = threading.Thread(
+            target=lambda: _sat_result.update({
+                'geo': _safe_satellite_analyze(farms),
+                'rad': _safe_fetch_radiation(farms),
+            }),
+            daemon=True,
+        )
+        _sat_thread.start()
+        _sat_thread.join(timeout=8.0)
+        if _sat_thread.is_alive():
+            logger.warning("Satellite data fetch timed out – using cached/defaults")
+        satellite_data = _sat_result.get('geo')
+        sat_radiation = _sat_result.get('rad')
 
 
         # Convert SQLite rows to plain dicts so Jinja2 `|tojson` works
         # without raising Undefined/NoneType serialization errors.
         health_rows = [dict(row) for row in health_rows]
         yield_summary = [dict(row) for row in yield_summary]
+
+        # Send SMS/WhatsApp notifications for high-risk alerts
+        notifications_sent = 0
+        if NOTIFICATION_ENABLED and high_risks and farms:
+            try:
+                owner_phone_row = conn.execute(
+                    "SELECT phone_number, notification_channel FROM users WHERE username = 'farm_owner'"
+                ).fetchone()
+                if owner_phone_row and owner_phone_row['phone_number']:
+                    phone = owner_phone_row['phone_number']
+                    channel = owner_phone_row['notification_channel'] or 'sms'
+                    # Send one notification for the highest-risk pest
+                    hr = high_risks[0]
+                    msg = notify_farm_alert(
+                        user_phone=phone,
+                        alert_type='pest_risk',
+                        field_name=hr.get('field_name', 'Unknown field'),
+                        farm_name=farms[0]['name'] if farms else 'Farm',
+                        channel=channel,
+                        pest=hr.get('pest_type', 'unknown pests'),
+                    )
+                    if msg.get('success'):
+                        notifications_sent = 1
+            except Exception as exc:
+                logger.warning("SMS notification send skipped: %s", exc)
 
         return render_template('agri_dashboard.html',
                                farms=farms, total_farms=total_farms,
@@ -2165,6 +2252,7 @@ def agri_dashboard():
                                recent_activities=recent_activities,
                                satellite_data=satellite_data,
                                sat_radiation=sat_radiation,
+                               notifications_sent=notifications_sent,
                                avg_health=avg_health, now=datetime.now())
     except Exception as e:
         flash(f'Agriculture dashboard error: {e}', 'error')
@@ -2452,6 +2540,129 @@ def log_agri_activity():
     except Exception as e:
         logger.error(f"Failed to log activity: {e}")
         return jsonify({"error": "Internal Error", "message": str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route('/api/agri/notify', methods=['POST'])
+def send_agri_notification():
+    """Send an SMS or WhatsApp notification about a farm alert or update.
+
+    Accepts JSON:
+        { message, channel, phone_number, activity_type, field_name, farm_name }
+    Falls back to the farm_owner demo user's phone number when not provided.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+
+    message = data.get('message', '')
+    channel = (data.get('channel') or 'sms').strip().lower()
+    phone = data.get('phone_number', '')
+
+    # If no explicit message, build one from the activity type
+    if not message and data.get('activity_type'):
+        message = render_alert_message(
+            data.get('activity_type'),
+            field=data.get('field_name', 'your field'),
+            farm=data.get('farm_name', 'your farm'),
+            **{k: v for k, v in data.items() if k not in ('message', 'channel', 'phone_number')}
+        )
+
+    if not message:
+        return jsonify({"error": "Bad Request", "message": "Either 'message' or 'activity_type' is required"}), 400
+
+    # Fall back to farm_owner's phone number
+    if not phone:
+        conn = get_db_connection()
+        try:
+            row = conn.execute(
+                "SELECT phone_number, notification_channel FROM users WHERE username='farm_owner'"
+            ).fetchone()
+            if row and row['phone_number']:
+                phone = row['phone_number']
+                channel = channel or (row['notification_channel'] or 'sms')
+        finally:
+            conn.close()
+
+    if not phone:
+        return jsonify({"error": "Bad Request", "message": "No phone number configured for notifications"}), 400
+
+    result = send_farm_notification(phone, message, channel=channel)
+    return jsonify(result)
+
+
+@app.route('/api/agri/map-data')
+def agri_map_data():
+    """Return farm and field locations as GeoJSON for the satellite map."""
+    conn = get_db_connection()
+    try:
+        farms = conn.execute('SELECT farm_id, name, owner_name, location, total_area_ha FROM farms').fetchall()
+        fields = conn.execute('''
+            SELECT f.field_id, f.name, f.area_ha, f.soil_type, f.irrigation_type,
+                   fa.name AS farm_name, fa.location, fa.farm_id
+            FROM fields f JOIN farms fa ON f.farm_id = fa.farm_id
+        ''').fetchall()
+
+        geojson = {
+            "type": "FeatureCollection",
+            "features": []
+        }
+
+        # Farm markers (with geocoding fallback for known cities)
+        from openmeteo_integration import geocode_location
+        for farm in farms:
+            geo = geocode_location(farm['location'])
+            if geo:
+                geojson["features"].append({
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [geo["longitude"], geo["latitude"]]},
+                    "properties": {
+                        "type": "farm",
+                        "farm_id": farm['farm_id'],
+                        "name": farm['name'],
+                        "owner": farm['owner_name'],
+                        "location": farm['location'],
+                        "area_ha": farm['total_area_ha'],
+                    }
+                })
+
+        # Field polygon approximations (center + area as circle)
+        for field in fields:
+            geo = geocode_location(field['location'])
+            if geo:
+                geojson["features"].append({
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [geo["longitude"], geo["latitude"]]},
+                    "properties": {
+                        "type": "field",
+                        "field_id": field['field_id'],
+                        "name": field['name'],
+                        "farm_name": field['farm_name'],
+                        "farm_id": field['farm_id'],
+                        "location": field['location'],
+                        "area_ha": field['area_ha'],
+                        "soil_type": field['soil_type'],
+                        "irrigation_type": field['irrigation_type'],
+                    }
+                })
+
+        return jsonify(geojson)
+    except Exception as e:
+        logger.error(f"Map data error: {e}")
+        return jsonify({"type": "FeatureCollection", "features": [], "error": str(e)})
+    finally:
+        conn.close()
+
+
+@app.route('/agri/map')
+def satellite_map():
+    """Satellite map view for farm navigation."""
+    conn = get_db_connection()
+    try:
+        farms = conn.execute('SELECT farm_id, name, owner_name, location, total_area_ha FROM farms').fetchall()
+        return render_template('satellite_map.html', farms=farms, now=datetime.now())
+    except Exception as e:
+        flash(f'Map error: {e}', 'error')
+        return render_template('satellite_map.html', farms=[], now=datetime.now())
     finally:
         conn.close()
 
