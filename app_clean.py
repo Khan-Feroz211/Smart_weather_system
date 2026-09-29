@@ -82,7 +82,12 @@ app.register_blueprint(agri_bp)
 from agri_sockets import register_agri_sockets
 register_agri_sockets(socketio)
 
-
+# Authentication (Supabase Auth) and the Admin Panel
+import db
+import auth
+import admin_routes
+auth.init_app(app)
+app.register_blueprint(admin_routes.admin_bp)
 
 # Configuration
 OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY', 'demo_key')

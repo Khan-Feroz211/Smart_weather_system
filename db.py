@@ -160,31 +160,51 @@ if psycopg2 is not None:
     for _t in (_TS_STR, _DATE_STR, _JSON_STR):
         _ext.register_type(_t)
 
-    class _RowCursor(_ext.cursor):
-        _cols = ()
+    class CursorWrapper:
+        """Thin Python adapter that keeps sqlite-like row semantics without subclassing psycopg2 cursors."""
+
+        def __init__(self, raw):
+            self._raw = raw
+            self._cols = [d[0] for d in getattr(raw, "description", None) or []]
 
         def execute(self, query, vars=None):
-            super().execute(query, vars)
-            self._cols = [d[0] for d in self.description] if self.description else []
+            self._raw.execute(query, vars)
+            self._cols = [d[0] for d in getattr(self._raw, "description", None) or []]
             return self
 
         def _wrap(self, values):
-            return None if values is None else Row(self._cols, values)
+            if values is None:
+                return None
+            if isinstance(values, Row):
+                return values
+            return Row(self._cols, values) if self._cols else values
 
         def fetchone(self):
-            return self._wrap(super().fetchone())
+            return self._wrap(self._raw.fetchone())
 
         def fetchall(self):
-            return [self._wrap(v) for v in super().fetchall()]
+            return [self._wrap(v) for v in self._raw.fetchall()]
 
         def fetchmany(self, size=None):
-            rows = super().fetchmany(size) if size else super().fetchmany()
+            rows = self._raw.fetchmany(size) if size is not None else self._raw.fetchmany()
             return [self._wrap(v) for v in rows]
 
         def __iter__(self):
             return iter(self.fetchall())
+
+        def __getattr__(self, name):
+            return getattr(self._raw, name)
+
+        def close(self):
+            return self._raw.close()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return self._raw.__exit__(exc_type, exc, tb)
 else:  # pragma: no cover
-    _RowCursor = None
+    CursorWrapper = None
 
 
 class Connection:
@@ -196,10 +216,11 @@ class Connection:
         self._closed = False
 
     def cursor(self):
-        return self._raw.cursor()
+        raw = self._raw.cursor()
+        return CursorWrapper(raw) if CursorWrapper is not None else raw
 
     def execute(self, sql, params=None):
-        cur = self._raw.cursor()
+        cur = self.cursor()
         try:
             cur.execute(sql, params)
         except Exception:
@@ -269,7 +290,6 @@ def _get_pool():
                     int(os.environ.get("DB_POOL_MIN", "1")),
                     int(os.environ.get("DB_POOL_MAX", "8")),
                     chosen_dsn,
-                    cursor_factory=_RowCursor,
                     connect_timeout=int(os.environ.get("DB_CONNECT_TIMEOUT", "10")),
                     application_name="smart-weather-system",
                     options="-c timezone=UTC -c statement_timeout=%d"

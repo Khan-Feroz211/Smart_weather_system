@@ -94,7 +94,7 @@ def main():
             conn.commit()
         print(f"✓ {email} is now an administrator.\n  Sign in at /admin/login")
     except sb.SupabaseError as exc:
-        die(f"Supabase Auth error: {exc}")
+        die(f"Supabase Auth error: {exc} | status={exc.status} | code={exc.code}")
     except db.DatabaseUnavailable as exc:
         die(f"Database unreachable: {exc}")
 

@@ -402,6 +402,34 @@ class TestConfigSafety(unittest.TestCase):
         # settings.html only prints the variable NAMES coming from Python (never values)
         self.assertEqual([o for o in offenders if not o.endswith("settings.html")], [])
 
+    def test_connection_execute_wraps_rows_consistently(self):
+        class FakeCursor:
+            def __init__(self):
+                self.description = [("count",)]
+                self._rows = [(7,), (8,)]
+                self.rowcount = len(self._rows)
+
+            def execute(self, query, params=None):
+                return None
+
+            def fetchone(self):
+                return self._rows[0]
+
+            def fetchall(self):
+                return list(self._rows)
+
+            def fetchmany(self, size=None):
+                rows = self._rows if size is None else self._rows[:size]
+                return list(rows)
+
+        class FakeRawConnection:
+            def cursor(self):
+                return FakeCursor()
+
+        cur = db.Connection(FakeRawConnection(), pool=None).execute("SELECT 1")
+        self.assertEqual(cur.fetchone()["count"], 7)
+        self.assertEqual([r["count"] for r in cur.fetchall()], [7, 8])
+
     def test_row_is_sqlite_row_compatible(self):
         r = db.Row(["a", "b"], [1, 2])
         self.assertEqual((r[0], r["b"], dict(r), list(r), len(r)), (1, 2, {"a": 1, "b": 2}, [1, 2], 2))
