@@ -1,0 +1,32 @@
+{
+  "classes": [
+    "wheat_rust",
+    "wheat_leaf_blight",
+    "wheat_powdery_mildew",
+    "wheat_healthy",
+    "rice_blast",
+    "rice_bacterial_blight",
+    "rice_brown_spot",
+    "rice_healthy",
+    "cotton_leaf_curl_virus",
+    "cotton_fusarium_wilt",
+    "cotton_healthy",
+    "maize_common_rust",
+    "maize_healthy"
+  ],
+  "weights": [
+    0.9498287576681593,
+    0.961272477640065,
+    1.108133550612853,
+    1.036176826547083,
+    0.9498287576681593,
+    0.961272477640065,
+    1.036176826547083,
+    0.9498287576681593,
+    0.9973201955515674,
+    0.961272477640065,
+    1.0638082085883385,
+    0.961272477640065,
+    1.0638082085883385
+  ]
+}

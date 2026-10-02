@@ -1,0 +1,44 @@
+{% extends "admin/_layout.html" %}
+{% from "admin/_macros.html" import presence_pill, sev_pill %}
+{% block content %}
+<a href="{{ url_for('admin.users') }}" class="small text-decoration-none"><i class="fa-solid fa-arrow-left me-1"></i>All users</a>
+<div class="row g-3 mt-1">
+  <div class="col-lg-4"><div class="a-card"><div class="a-card-b">
+    <div class="d-flex align-items-center gap-3 mb-3"><div class="avatar activity-item" style="border:0;padding:0"><div class="avatar" style="width:56px;height:56px;font-size:1.3rem">{{ user.username[:1] | upper }}</div></div>
+      <div><h5 class="mb-0">{{ user.username }}</h5><div class="text-muted small">{{ user.email }}</div></div></div>
+    <div class="mb-3">{{ presence_pill(user.presence) }} <span class="pill {{ 'blue' if user.role == 'admin' else 'gray' }}">{{ user.role }}</span></div>
+    <dl class="row small mb-0">
+      <dt class="col-5 text-muted fw-normal">Location</dt><dd class="col-7">{{ user.location or '—' }}</dd>
+      <dt class="col-5 text-muted fw-normal">Registered</dt><dd class="col-7">{{ user.created_at[:16] }}</dd>
+      <dt class="col-5 text-muted fw-normal">Last active</dt><dd class="col-7">{{ user.last_seen_rel }}</dd>
+      <dt class="col-5 text-muted fw-normal">Last login</dt><dd class="col-7">{{ user.last_login_at[:16] if user.last_login_at else 'never' }}</dd>
+      <dt class="col-5 text-muted fw-normal">Logins</dt><dd class="col-7">{{ user.login_count }}</dd>
+      <dt class="col-5 text-muted fw-normal">Activities</dt><dd class="col-7">{{ user.activity_count }}</dd>
+      <dt class="col-5 text-muted fw-normal">Alerts</dt><dd class="col-7">{{ user.alert_count }}</dd>
+      <dt class="col-5 text-muted fw-normal">Login account</dt><dd class="col-7">{{ 'Supabase Auth' if user.auth_user_id else 'Profile only (no login)' }}</dd>
+    </dl>
+    {% if user.role != 'admin' and user.id != me %}
+    <hr>
+    <div class="d-flex gap-2 flex-wrap">
+      <button class="btn btn-sm btn-outline-{{ 'warning' if user.is_active else 'success' }}" data-action="post" data-url="{{ url_for('admin.api_user_toggle', user_id=user.id) }}"
+        data-title="{{ 'Deactivate' if user.is_active else 'Activate' }} user" data-confirm="{{ 'Deactivate ' ~ user.username ~ '? They will be signed out and unable to sign in.' if user.is_active else 'Re-activate ' ~ user.username ~ '?' }}" data-ok="{{ 'Deactivate' if user.is_active else 'Activate' }}">
+        <i class="fa-solid fa-{{ 'user-slash' if user.is_active else 'user-check' }} me-1"></i>{{ 'Deactivate' if user.is_active else 'Activate' }}</button>
+      <button class="btn btn-sm btn-outline-danger" {{ 'disabled' if user.is_active }} data-action="post" data-url="{{ url_for('admin.api_user_delete', user_id=user.id) }}"
+        data-redirect="{{ url_for('admin.users') }}" data-title="Delete user permanently"
+        data-confirm="Permanently delete {{ user.username }} and their activity and alerts? This cannot be undone." data-ok="Delete forever"><i class="fa-solid fa-trash me-1"></i>Delete</button>
+    </div>
+    {% if user.is_active %}<div class="form-text">Deactivate first to enable deletion.</div>{% endif %}
+    {% endif %}
+  </div></div></div>
+  <div class="col-lg-8">
+    <div class="a-card mb-3"><div class="a-card-h">Recent activity</div><div class="a-card-b">
+      {% for a in user.activities %}<div class="activity-item"><div class="flex-grow-1">{{ a.text }}{% if a.weather_condition %} <span class="text-muted">· {{ a.weather_condition }}</span>{% endif %}</div><small class="text-muted">{{ a.when }}</small></div>
+      {% else %}<div class="empty-state"><i class="fa-regular fa-clock"></i>No recorded activity.</div>{% endfor %}
+    </div></div>
+    <div class="a-card"><div class="a-card-h">Alerts</div><div class="a-card-b">
+      {% for a in user.alerts %}<div class="activity-item"><div class="flex-grow-1">{{ sev_pill(a.severity) }} <strong>{{ a.alert_type }}</strong> — {{ a.message }}</div><small class="text-muted">{{ a.created_at[:10] }}</small></div>
+      {% else %}<div class="empty-state"><i class="fa-regular fa-bell"></i>No alerts.</div>{% endfor %}
+    </div></div>
+  </div>
+</div>
+{% endblock %}

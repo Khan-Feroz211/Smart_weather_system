@@ -1,0 +1,36 @@
+{% extends "admin/_layout.html" %}
+{% from "admin/_macros.html" import stat_card, table, pager %}
+{% block content %}
+{% if subtitle %}<p class="text-muted small mb-3">{{ subtitle }}</p>{% endif %}
+{% if tabs %}<div class="tabs-row">{% for t in tabs %}<a href="{{ t.url }}" class="{{ 'active' if t.active }}">{{ t.label }}</a>{% endfor %}</div>{% endif %}
+{% if stats %}<div class="row g-3 mb-4">{% for s in stats %}<div class="col-6 col-lg-4 col-xl-3">{{ stat_card(s) }}</div>{% endfor %}</div>{% endif %}
+
+{% if charts %}<div class="row g-3 mb-4" id="charts">
+  {% for c in charts %}<div class="col-12 {{ 'col-xl-8' if c.wide else 'col-md-6 col-xl-4' }}"><div class="a-card h-100">
+    <div class="a-card-h">{{ c.title }}</div><div class="a-card-b"><div class="chart-box"><canvas id="ch-{{ c.id }}"></canvas></div></div></div></div>{% endfor %}
+</div>{% endif %}
+
+{% for x in extra %}<div class="a-card mb-4"><div class="a-card-h">{{ x.title }}</div><div class="a-card-b p-0">{{ table(x.columns, x.rows, 'Nothing to show yet.') }}</div></div>{% endfor %}
+
+<div class="a-card">
+  {% if search or filters %}
+  <div class="a-card-h filters">
+    <form class="d-flex flex-wrap gap-2 w-100" method="get">
+      {% for k in ['tab'] %}{% if values.get(k) %}<input type="hidden" name="{{ k }}" value="{{ values.get(k) }}">{% endif %}{% endfor %}
+      {% if search %}<input class="form-control form-control-sm" style="max-width:260px" type="search" name="q" value="{{ values.get('q','') }}" placeholder="Search…">{% endif %}
+      {% for f in filters %}<select class="form-select form-select-sm" style="max-width:200px" name="{{ f.name }}" aria-label="{{ f.label }}">
+        {% for v, l in f.options %}<option value="{{ v }}" {{ 'selected' if values.get(f.name,'') == v }}>{{ l }}</option>{% endfor %}</select>{% endfor %}
+      <button class="btn btn-sm btn-primary" type="submit"><i class="fa-solid fa-magnifying-glass me-1"></i>Filter</button>
+      <a class="btn btn-sm btn-outline-secondary" href="{{ request.path }}{{ '?tab=' ~ values.get('tab') if values.get('tab') }}">Reset</a>
+    </form>
+  </div>{% endif %}
+  <div class="a-card-b p-0">{{ table(columns, data.rows, empty) }}</div>
+  <div class="px-3 pb-3">{{ pager(pg) }}</div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+{% for c in charts %}AdminUI.chart('ch-{{ c.id }}', {{ c.type | tojson }}, {{ c.labels | tojson }}, {{ c.datasets | tojson }}, {% if c.id == 'trend' %}{scales:{y:{beginAtZero:true,ticks:{precision:0}},y1:{position:'right',grid:{drawOnChartArea:false}}}}{% else %}null{% endif %});
+{% endfor %}
+</script>
+{% endblock %}

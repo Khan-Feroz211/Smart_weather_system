@@ -1,0 +1,22 @@
+{% extends "admin/_layout.html" %}
+{% from "admin/_macros.html" import table %}
+{% block content %}
+<div class="row g-3">
+  <div class="col-lg-6"><div class="a-card h-100"><div class="a-card-h">Database</div><div class="a-card-b">
+    <p>{% if db_ok %}<span class="pill green">Connected</span>{% else %}<span class="pill red">Not connected</span> <span class="small text-muted">{{ db_msg }}</span>{% endif %}</p>
+    {% if facts %}<dl class="row small mb-0"><dt class="col-4 text-muted fw-normal">Database</dt><dd class="col-8">{{ facts.database }}</dd><dt class="col-4 text-muted fw-normal">Server</dt><dd class="col-8">{{ facts.version }}</dd></dl>{% endif %}
+  </div></div></div>
+  <div class="col-lg-6"><div class="a-card h-100"><div class="a-card-h">Supabase configuration <small class="text-muted fw-normal">(values are never displayed)</small></div><div class="a-card-b">
+    {% for k, v in supabase.items() %}<div class="d-flex justify-content-between small py-1"><code>{{ k }}</code>{% if v %}<span class="pill green">set</span>{% else %}<span class="pill red">missing</span>{% endif %}</div>{% endfor %}
+    <div class="small text-muted mt-2">Bootstrap admin email: {{ admin_email or 'not set' }}</div>
+  </div></div></div>
+  <div class="col-lg-6"><div class="a-card"><div class="a-card-h">Thresholds &amp; security (set via environment)</div><div class="a-card-b">
+    {% for k, v in config.items() %}<div class="d-flex justify-content-between small py-1"><span>{{ k }}</span><strong>{{ v }}</strong></div>{% endfor %}
+  </div></div></div>
+  <div class="col-lg-6"><div class="a-card"><div class="a-card-h">Recent admin actions</div><div class="a-card-b p-0">
+    {% if audit %}<div class="table-wrap"><table class="a-table"><thead><tr><th>Admin</th><th>Action</th><th>Target</th><th>When</th></tr></thead><tbody>
+      {% for a in audit %}<tr><td>{{ a.admin }}</td><td>{{ a.action }}</td><td class="text-muted">{{ a.target_type or '' }} {{ (a.target_id or '')[:8] }}</td><td class="text-muted">{{ a.when }}</td></tr>{% endfor %}</tbody></table></div>
+    {% else %}<div class="empty-state"><i class="fa-regular fa-clipboard"></i>No admin actions recorded yet.</div>{% endif %}
+  </div></div></div>
+</div>
+{% endblock %}

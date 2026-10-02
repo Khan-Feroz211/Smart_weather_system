@@ -1,0 +1,51 @@
+{% extends "admin/_layout.html" %}
+{% from "admin/_macros.html" import presence_pill, pager %}
+{% macro sort_link(key, label) -%}
+  {%- set cur = values.get('sort','registered') -%}{%- set d = 'asc' if (cur == key and values.get('dir','desc') == 'desc') else 'desc' -%}
+  <a class="text-decoration-none text-reset" href="{{ url_for('admin.users', q=values.get('q',''), role=values.get('role',''), status=values.get('status',''), sort=key, dir=d) }}">{{ label }}{% if cur == key %} <i class="fa-solid fa-arrow-{{ 'up' if values.get('dir','desc') == 'asc' else 'down' }} small"></i>{% endif %}</a>
+{%- endmacro %}
+{% block content %}
+<div class="a-card">
+  <div class="a-card-h filters">
+    <form class="d-flex flex-wrap gap-2 w-100" method="get">
+      <input class="form-control form-control-sm" style="max-width:260px" type="search" name="q" value="{{ values.get('q','') }}" placeholder="Search name, email, location…">
+      <select class="form-select form-select-sm" style="max-width:150px" name="role" aria-label="Role">
+        <option value="">All roles</option><option value="user" {{ 'selected' if values.get('role') == 'user' }}>User</option><option value="admin" {{ 'selected' if values.get('role') == 'admin' }}>Admin</option></select>
+      <select class="form-select form-select-sm" style="max-width:190px" name="status" aria-label="Status">
+        {% for v, l in status_filters %}<option value="{{ v }}" {{ 'selected' if values.get('status','') == v }}>{{ l }}</option>{% endfor %}</select>
+      <input type="hidden" name="sort" value="{{ values.get('sort','registered') }}"><input type="hidden" name="dir" value="{{ values.get('dir','desc') }}">
+      <button class="btn btn-sm btn-primary"><i class="fa-solid fa-magnifying-glass me-1"></i>Filter</button>
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.users') }}">Reset</a>
+    </form>
+  </div>
+  <div class="a-card-b p-0">
+  {% if data.rows %}
+  <div class="table-wrap"><table class="a-table">
+    <thead><tr><th>{{ sort_link('username','User') }}</th><th>{{ sort_link('email','Email') }}</th><th>Location</th><th>Role</th>
+      <th>{{ sort_link('registered','Registered') }}</th><th>{{ sort_link('last_active','Last Active') }}</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+    <tbody>
+    {% for u in data.rows %}
+      <tr>
+        <td><a class="fw-semibold text-decoration-none" href="{{ url_for('admin.user_detail', user_id=u.id) }}">{{ u.username }}</a>{% if u.id == me %} <span class="pill blue">you</span>{% endif %}</td>
+        <td>{{ u.email }}</td><td>{{ u.location or '—' }}</td>
+        <td><span class="pill {{ 'blue' if u.role == 'admin' else 'gray' }}">{{ u.role }}</span></td>
+        <td class="text-muted">{{ u.created_at[:10] }}</td>
+        <td class="text-muted" title="{{ u.last_seen_at or '' }}">{{ u.last_seen_rel }}</td>
+        <td>{{ presence_pill(u.presence) }}</td>
+        <td class="text-end text-nowrap">
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.user_detail', user_id=u.id) }}" title="View"><i class="fa-solid fa-eye"></i></a>
+          {% if u.role != 'admin' and u.id != me %}
+          <button class="btn btn-sm btn-outline-{{ 'warning' if u.is_active else 'success' }}" data-action="post"
+            data-url="{{ url_for('admin.api_user_toggle', user_id=u.id) }}" data-title="{{ 'Deactivate' if u.is_active else 'Activate' }} user"
+            data-confirm="{{ ('Deactivate ' ~ u.username ~ '? They will be signed out and unable to sign in.') if u.is_active else ('Re-activate ' ~ u.username ~ '?') }}"
+            data-ok="{{ 'Deactivate' if u.is_active else 'Activate' }}" title="{{ 'Deactivate' if u.is_active else 'Activate' }}"><i class="fa-solid fa-{{ 'user-slash' if u.is_active else 'user-check' }}"></i></button>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody></table></div>
+  {% else %}<div class="empty-state"><i class="fa-regular fa-user"></i>No users match these filters.</div>{% endif %}
+  </div>
+  <div class="px-3 pb-3">{{ pager(pg) }}</div>
+</div>
+{% endblock %}

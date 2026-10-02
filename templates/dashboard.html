@@ -1,0 +1,647 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Smart Weather System{% endblock %}
+
+{% block content %}
+<div class="dashboard-v2">
+
+  <!-- ================================================================
+       HEADER / NAVBAR
+       ================================================================ -->
+  <div class="dashboard-v2-header mb-4">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+      <div>
+        <h1 class="dashboard-v2-title mb-1">
+          <i class="fas fa-cloud-sun me-2"></i>Weather Intelligence
+        </h1>
+        <div class="dashboard-v2-meta text-muted d-flex flex-wrap align-items-center gap-2">
+          <span class="d-flex align-items-center gap-1">
+            <i class="fas fa-location-dot"></i>
+            <span id="dashboard-location">
+              {% if recent_weather %}{{ recent_weather[0].location }}{% else %}Lahore{% endif %}
+            </span>
+          </span>
+          <span class="bullet">•</span>
+          <span class="d-flex align-items-center gap-1">
+            <i class="fas fa-clock"></i>
+            Last Updated: <span id="last-updated-time">{{ now.strftime('%I:%M:%S %p') if now else '—' }}</span>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       CURRENT WEATHER  |  AI PREDICTION
+       ================================================================ -->
+  <div class="row g-4 mb-4">
+
+    <!-- Current Weather -->
+    <div class="col-lg-12">
+      <div class="card-futuristic h-100">
+        <div class="card-header glass-effect">
+          <h5 class="card-title mb-0">
+            <i class="fas fa-cloud-sun me-2"></i>Current Weather
+          </h5>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-4 text-center">
+              <div class="weather-icon-display mb-2">
+                <i class="fas fa-sun fa-2x"></i>
+              </div>
+              <h2 class="temperature temp-warm mb-1 fw-bold" id="current-temp">
+                {% if recent_weather %}{{ "%.1f"|format(recent_weather[0].temperature) }}°C{% else %}--°C{% endif %}
+              </h2>
+              <div class="small text-muted" id="current-condition">
+                {% if recent_weather %}{{ recent_weather[0].weather_condition }}{% else %}No data{% endif %}
+              </div>
+            </div>
+            <div class="col-8">
+              <div class="row g-2">
+                <div class="col-6">
+                  <div class="small text-muted">Humidity</div>
+                  <div class="fw-bold" id="current-humidity">
+                    {% if recent_weather %}{{ recent_weather[0].humidity }}%{% else %}--{% endif %}
+                  </div>
+                </div>
+                <div class="col-6">
+                  <div class="small text-muted">Wind</div>
+                  <div class="fw-bold" id="current-wind">
+                    {% if recent_weather %}{{ recent_weather[0].wind_speed }} km/h{% else %}--{% endif %}
+                  </div>
+                </div>
+                <div class="col-6">
+                  <div class="small text-muted">Pressure</div>
+                  <div class="fw-bold" id="current-pressure">--</div>
+                </div>
+                <div class="col-6">
+                  <div class="small text-muted">Feels Like</div>
+                  <div class="fw-bold">--°C</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       TODAY'S INTELLIGENCE
+       ================================================================ -->
+  <div class="row g-4 mb-4">
+    <div class="col-12">
+      <div class="card-futuristic h-100">
+        <div class="card-header glass-effect">
+          <div class="d-flex align-items-center">
+            <h5 class="card-title mb-0 me-3">
+              <i class="fas fa-lightbulb me-2"></i>Today's Intelligence
+            </h5>
+            <ul class="nav nav-tabs card-header-tabs intel-tab-nav" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="intel-weather-tab"
+                      data-bs-toggle="tab" data-bs-target="#intel-weather"
+                      type="button" role="tab" aria-controls="intel-weather" aria-selected="true">
+                <i class="fas fa-cloud-sun me-1"></i>Weather
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="intel-rain-tab"
+                      data-bs-toggle="tab" data-bs-target="#intel-rain"
+                      type="button" role="tab" aria-controls="intel-rain" aria-selected="false">
+                <i class="fas fa-cloud-rain me-1"></i>Rain
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="intel-farming-tab"
+                      data-bs-toggle="tab" data-bs-target="#intel-farming"
+                      type="button" role="tab" aria-controls="intel-farming" aria-selected="false">
+                <i class="fas fa-tractor me-1"></i>Farming
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="intel-risk-tab"
+                      data-bs-toggle="tab" data-bs-target="#intel-risk"
+                      type="button" role="tab" aria-controls="intel-risk" aria-selected="false">
+                <i class="fas fa-triangle-exclamation me-1"></i>Risk
+              </button>
+            </li>
+          </ul>
+        </div>
+        <div class="card-body">
+          <div class="tab-content pt-2">
+
+            <!-- Weather Tab -->
+            <div class="tab-pane fade show active" id="intel-weather" role="tabpanel">
+              <div class="row g-3">
+                {% if recent_weather %}
+                  {% for weather in recent_weather %}
+                  <div class="col-md-4">
+                    <div class="intel-item d-flex align-items-center p-3 glass-effect rounded">
+                      <i class="fas fa-{{ 'sun' if 'Sunny' in weather.weather_condition else 'cloud' if 'Cloud' in weather.weather_condition else 'cloud-rain' }} me-3 text-warning fa-lg"></i>
+                      <div>
+                        <div class="fw-bold">{{ weather.location }}</div>
+                        <div class="text-muted small">{{ "%.1f"|format(weather.temperature) }}°C • {{ weather.weather_condition }}</div>
+                        <div class="text-muted small">{{ weather.humidity }}% • {{ weather.wind_speed }} km/h</div>
+                      </div>
+                    </div>
+                  </div>
+                  {% endfor %}
+                {% else %}
+                  <div class="col-12 text-center text-muted py-3">No weather data available</div>
+                {% endif %}
+              </div>
+            </div>
+
+            <!-- Rain Tab -->
+            <div class="tab-pane fade" id="intel-rain" role="tabpanel">
+              {% set ns = namespace(rain_found=false) %}
+              {% for weather in recent_weather %}
+                {% if 'rain' in weather.weather_condition|lower or 'drizzle' in weather.weather_condition|lower %}
+                  {% set ns.rain_found = true %}
+                {% endif %}
+              {% endfor %}
+              {% if ns.rain_found %}
+                <div class="d-flex flex-column gap-2">
+                  {% for weather in recent_weather %}
+                    {% if 'rain' in weather.weather_condition|lower or 'drizzle' in weather.weather_condition|lower %}
+                    <div class="rain-item d-flex justify-content-between py-2 border-bottom">
+                      <span><i class="fas fa-cloud-rain me-1 text-info"></i>{{ weather.location }}</span>
+                      <span class="text-info">{{ weather.weather_condition }}</span>
+                    </div>
+                    {% endif %}
+                  {% endfor %}
+                </div>
+              {% else %}
+                <div class="text-center text-muted py-4">
+                  <i class="fas fa-cloud-sun fa-2x mb-2"></i>
+                  <p class="mb-0">No precipitation recorded in recent observations.</p>
+                </div>
+              {% endif %}
+            </div>
+
+            <!-- Farming Tab -->
+            <div class="tab-pane fade" id="intel-farming" role="tabpanel">
+              {% if recent_activities %}
+                <div class="d-flex flex-column gap-2">
+                  {% for activity in recent_activities %}
+                  <div class="farming-item d-flex align-items-center py-2 border-bottom">
+                    <div class="flex-shrink-0 me-3">
+                      <i class="fas fa-{{ 'running' if activity.activity_type == 'Running' else 'book' if activity.activity_type == 'Reading' else 'biking' if activity.activity_type == 'Cycling' else 'seedling' }} fa-lg text-secondary"></i>
+                    </div>
+                    <div class="flex-grow-1">
+                      <div class="fw-bold">{{ activity.username }}</div>
+                      <div class="text-muted small">{{ activity.activity_type }} • {{ activity.weather_condition }}</div>
+                    </div>
+                    <small class="text-muted flex-shrink-0">{{ activity.activity_date[:16] }}</small>
+                  </div>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <div class="text-center text-muted py-4">
+                  <i class="fas fa-tractor fa-2x mb-2"></i>
+                  <p class="mb-0">No farming activities recorded.</p>
+                </div>
+              {% endif %}
+            </div>
+
+            <!-- Risk Tab -->
+            <div class="tab-pane fade" id="intel-risk" role="tabpanel">
+              {% if latest_pipeline %}
+                <div class="d-flex flex-column gap-2">
+                  {% for item in latest_pipeline %}
+                  <div class="risk-item d-flex justify-content-between align-items-start py-2 border-bottom">
+                    <div class="d-flex align-items-start gap-3">
+                      <i class="fas fa-microchip fa-lg text-secondary"></i>
+                      <div>
+                        <div class="fw-bold">{{ item.location }} — {{ item.sensor_id }}</div>
+                        <div class="text-muted small">{{ item.reason }}</div>
+                      </div>
+                    </div>
+                    <span class="badge bg-{{ 'danger' if item.severity in ['critical', 'high'] else 'warning text-dark' if item.severity == 'medium' else 'info' }}">
+                      {{ item.severity }}
+                    </span>
+                  </div>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <div class="text-center text-muted py-4">
+                  <i class="fas fa-shield-halved fa-2x mb-2"></i>
+                  <p class="mb-0">No risk alerts. All sensors operating normally.</p>
+                </div>
+              {% endif %}
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       WEATHER ANALYTICS  (Interactive Charts)
+       ================================================================ -->
+  <div class="row g-4 mb-4">
+    <div class="col-12">
+      <div class="card-futuristic h-100">
+        <div class="card-header glass-effect d-flex justify-content-between align-items-center">
+          <h5 class="card-title mb-0">
+            <i class="fas fa-chart-line me-2"></i>Weather Analytics
+          </h5>
+          <div class="analytics-tab-nav d-flex gap-1">
+            <button class="btn btn-sm btn-outline-secondary active" data-chart="tempChart">Temperature</button>
+            <button class="btn btn-sm btn-outline-secondary" data-chart="humidChart">Humidity</button>
+            <button class="btn btn-sm btn-outline-secondary" data-chart="windChart">Wind</button>
+            <button class="btn btn-sm btn-outline-secondary" data-chart="rainChart">Rainfall</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="analytics-chart-wrapper">
+            <div class="chart-container">
+              <canvas id="tempChart"></canvas>
+            </div>
+            <div class="chart-container d-none">
+              <canvas id="humidChart"></canvas>
+            </div>
+            <div class="chart-container d-none">
+              <canvas id="windChart"></canvas>
+            </div>
+            <div class="chart-container d-none">
+              <canvas id="rainChart"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       WEATHER MAP  |  AI AGRICULTURE INSIGHTS
+       ================================================================ -->
+  <div class="row g-4 mb-4">
+
+    <!-- Weather Map -->
+    <div class="col-lg-6">
+      <div class="card-futuristic h-100">
+        <div class="card-header glass-effect d-flex justify-content-between align-items-center">
+          <h5 class="card-title mb-0">
+            <i class="fas fa-map me-2"></i>Weather Map
+          </h5>
+          <a href="{{ url_for('satellite_map') }}" class="btn btn-sm btn-outline-secondary">
+            <i class="fas fa-satellite me-1"></i>Full Map
+          </a>
+        </div>
+        <div class="card-body">
+          {% if recent_weather %}
+            <div class="weather-map-display">
+              {% for weather in recent_weather %}
+              <div class="map-pin-item d-flex align-items-center mb-3 pb-3 {% if not loop.last %}border-bottom{% endif %}">
+                <i class="fas fa-map-marker-alt fa-lg text-danger me-3 flex-shrink-0"></i>
+                <div class="flex-grow-1">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <span class="fw-bold">{{ weather.location }}</span>
+                    <span class="temperature temp-{{ 'cold' if weather.temperature < 10 else 'mild' if weather.temperature < 20 else 'warm' if weather.temperature < 30 else 'hot' }} small">
+                      {{ "%.1f"|format(weather.temperature) }}°C
+                    </span>
+                  </div>
+                  <div class="text-muted small d-flex align-items-center gap-1">
+                    <i class="fas fa-{{ 'sun' if 'Sunny' in weather.weather_condition else 'cloud' if 'Cloud' in weather.weather_condition else 'cloud-rain' }}"></i>
+                    {{ weather.weather_condition }}
+                  </div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="text-center text-muted py-4">
+              <i class="fas fa-map-marker-slash fa-2x mb-2"></i>
+              <p class="mb-0">No weather data to display on map</p>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- AI Agriculture Insights -->
+    <div class="col-lg-6">
+      <div class="card-futuristic h-100">
+        <div class="card-header glass-effect">
+          <h5 class="card-title mb-0">
+            <i class="fas fa-robot me-2"></i>AI Agriculture Insights
+          </h5>
+        </div>
+        <div class="card-body">
+          {% if latest_pipeline %}
+            {% for item in latest_pipeline %}
+            <div class="insight-item d-flex align-items-start mb-3 {% if not loop.last %}border-bottom{% endif %} pb-3">
+              <div class="flex-shrink-0 me-3">
+                <i class="fas fa-microchip fa-lg {{ 'text-danger' if item.severity in ['critical', 'high'] else 'text-warning' if item.severity == 'medium' else 'text-info' }}"></i>
+              </div>
+              <div class="flex-grow-1">
+                <div class="d-flex justify-content-between align-items-start mb-1">
+                  <span class="fw-bold">{{ item.location }} — {{ item.sensor_id }}</span>
+                  <span class="badge bg-{{ 'danger' if item.severity in ['critical', 'high'] else 'warning text-dark' if item.severity == 'medium' else 'info' }}">
+                    {{ item.severity }}
+                  </span>
+                </div>
+                <div class="text-muted small mb-1">{{ item.recommended_action }}</div>
+                <div class="d-flex align-items-center gap-2 small">
+                  <span class="text-muted">Quality:</span>
+                  <span class="fw-bold">{{ item.quality_label }} ({{ "%.2f"|format(item.validation_score or 0) }})</span>
+                  <span class="text-muted">Confidence: {{ "%.0f"|format(item.validation_score * 100 or 0) }}%</span>
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+            <div class="text-center text-muted py-4">
+              <i class="fas fa-robot fa-2x mb-2"></i>
+              <p class="mb-0">No sensor data available for AI analysis.</p>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       RECENT ACTIVITIES
+       ================================================================ -->
+  <div class="row g-4 mb-4">
+    <div class="col-12">
+      <div class="card-futuristic h-100">
+        <div class="card-header glass-effect">
+          <h5 class="card-title mb-0">
+            <i class="fas fa-history me-2"></i>Recent Activities
+          </h5>
+        </div>
+        <div class="card-body">
+          {% if recent_activities %}
+            {% for activity in recent_activities %}
+            <div class="d-flex align-items-center border-bottom pb-3 mb-3">
+              <div class="flex-shrink-0">
+                <div class="weather-icon small">
+                  <i class="fas fa-{{ 'running' if activity.activity_type == 'Running' else 'book' if activity.activity_type == 'Reading' else 'biking' }}"></i>
+                </div>
+              </div>
+              <div class="flex-grow-1 ms-3">
+                <div class="fw-bold">{{ activity.username }}</div>
+                <div class="text-muted small">{{ activity.activity_type }} • {{ activity.weather_condition }}</div>
+              </div>
+              <div class="flex-shrink-0">
+                <small class="text-muted">{{ activity.activity_date[:16] }}</small>
+                {% if current_user %}
+                <form method="POST" action="{{ url_for('delete_user_activity', activity_id=activity.activity_id) }}" class="d-inline">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="btn btn-sm btn-outline-danger ms-2" title="Delete this activity">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </form>
+                {% endif %}
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+            <div class="text-center text-muted py-4">
+              <i class="fas fa-inbox fa-2x mb-2"></i>
+              <p class="mb-0">No recent activities</p>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       RECENT WEATHER DATA
+       ================================================================ -->
+  <div class="row g-4 mb-4">
+    <div class="col-12">
+      <div class="card-futuristic">
+        <div class="card-header glass-effect">
+          <h5 class="card-title mb-0">
+            <i class="fas fa-database me-2"></i>Recent Weather Data
+          </h5>
+        </div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-futuristic">
+              <thead>
+                <tr>
+                  <th>Location</th>
+                  <th>Temperature</th>
+                  <th>Condition</th>
+                  <th>Humidity</th>
+                  <th>Wind Speed</th>
+                  <th>Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if recent_weather %}
+                  {% for weather in recent_weather %}
+                  <tr>
+                    <td>{{ weather.location }}</td>
+                    <td class="temperature temp-{{ 'cold' if weather.temperature < 10 else 'mild' if weather.temperature < 20 else 'warm' if weather.temperature < 30 else 'hot' }}">{{ "%.1f"|format(weather.temperature) }}°C</td>
+                    <td>
+                      <i class="fas fa-{{ 'sun' if 'Sunny' in weather.weather_condition else 'cloud' if 'Cloud' in weather.weather_condition else 'cloud-rain' }} me-1"></i>
+                      {{ weather.weather_condition }}
+                    </td>
+                    <td>{{ weather.humidity }}%</td>
+                    <td>{{ weather.wind_speed }} km/h</td>
+                    <td><small class="text-muted">{{ weather.recorded_at[:16] }}</small></td>
+                  </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr>
+                    <td colspan="6" class="text-center text-muted py-3">
+                      No weather data available
+                    </td>
+                  </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Request initial weather data
+    if (window.weatherSystem) {
+        window.weatherSystem.requestWeather('Lahore');
+    }
+
+    // Simulate AI training for demo
+    setTimeout(() => {
+        if (window.weatherSystem && "{{ ai_status }}" === "Training") {
+            window.weatherSystem.simulateAITraining();
+        }
+    }, 3000);
+
+    // Initialize Weather Analytics Charts
+    initDashboardCharts();
+
+    // Live last-updated timestamp
+    updateLastUpdatedTime();
+    setInterval(updateLastUpdatedTime, 1000);
+});
+
+/**
+ * Update the "Last Updated" timestamp every second
+ */
+function updateLastUpdatedTime() {
+    const el = document.getElementById('last-updated-time');
+    if (el) {
+        const now = new Date();
+        el.textContent = now.toLocaleTimeString('en-US', {
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+            hour12: true
+        });
+    }
+}
+
+/**
+ * Initialise Chart.js charts for the Weather Analytics section.
+ * Uses server-rendered recent_weather data — no hardcoded values.
+ */
+function initDashboardCharts() {
+    const wrapper = document.querySelector('.analytics-chart-wrapper');
+    if (!wrapper) return;
+
+    const containers = wrapper.querySelectorAll('.chart-container');
+    const buttons  = wrapper.closest('.card-futuristic').querySelectorAll('[data-chart]');
+
+    // Hide all containers except the first
+    containers.forEach((c, i) => { if (i > 0) c.classList.add('d-none'); });
+
+    // Tab switching
+    buttons.forEach(btn => {
+        btn.addEventListener('click', function () {
+            const target = this.dataset.chart;
+            buttons.forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            containers.forEach(c => {
+                c.classList.add('d-none');
+                if (c.querySelector('canvas') && c.querySelector('canvas').id === target) {
+                    c.classList.remove('d-none');
+                }
+            });
+        });
+    });
+
+    {% if recent_weather %}
+    const labels = [{% for w in recent_weather %}'{{ w.location }}',{% endfor %}];
+    const temps  = [{% for w in recent_weather %}{{ w.temperature }},{% endfor %}];
+    const humids = [{% for w in recent_weather %}{{ w.humidity }},{% endfor %}];
+    const winds  = [{% for w in recent_weather %}{{ w.wind_speed }},{% endfor %}];
+
+    const baseOpts = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: 'var(--text-on-dark)', font: { size: 12 } } } },
+        scales: {
+            y: {
+                ticks: { color: 'var(--color-text-muted)' },
+                border: { color: 'rgba(71, 85, 105, 0.5)' },
+                grid: { color: 'rgba(71, 85, 105, 0.2)' },
+                beginAtZero: true
+            },
+            x: {
+                ticks: { color: 'var(--color-text-muted)' },
+                border: { color: 'rgba(71, 85, 105, 0.5)' },
+                grid: { display: false }
+            }
+        }
+    };
+
+    new Chart(document.getElementById('tempChart'), {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Temperature (°C)',
+                data: temps,
+                borderColor: '#D4AF37',
+                backgroundColor: 'rgba(212, 175, 55, 0.1)',
+                tension: 0.3, fill: true,
+                pointBackgroundColor: '#D4AF37', pointRadius: 5, borderWidth: 2
+            }]
+        },
+        options: baseOpts
+    });
+
+    new Chart(document.getElementById('humidChart'), {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Humidity (%)',
+                data: humids,
+                borderColor: '#87CEEB',
+                backgroundColor: 'rgba(135, 206, 235, 0.1)',
+                tension: 0.3, fill: true,
+                pointBackgroundColor: '#87CEEB', pointRadius: 5, borderWidth: 2
+            }]
+        },
+        options: baseOpts
+    });
+
+    new Chart(document.getElementById('windChart'), {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Wind Speed (km/h)',
+                data: winds,
+                backgroundColor: '#D4AF37',
+                borderColor: '#B8860B',
+                borderWidth: 1
+            }]
+        },
+        options: baseOpts
+    });
+
+    new Chart(document.getElementById('rainChart'), {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Rainfall (mm)',
+                data: [{% for w in recent_weather %}0,{% endfor %}],
+                backgroundColor: '#87CEEB',
+                borderColor: '#5DA5D0',
+                borderWidth: 1
+            }]
+        },
+        options: Object.assign({}, baseOpts, {
+            plugins: {
+                legend: { labels: { color: 'var(--text-on-dark)' } },
+                tooltip: {
+                    callbacks: {
+                        label: function () { return 'No rainfall data recorded'; }
+                    }
+                }
+            }
+        })
+    });
+    {% else %}
+    // No data — show empty state
+    containers.forEach((c, i) => {
+        if (i === 0) {
+            c.innerHTML = '<div class="chart-no-data d-flex align-items-center justify-content-center h-100"><div class="text-center text-muted"><i class="fas fa-chart-line fa-2x mb-2"></i><p>No weather analytics data available yet.</p></div></div>';
+        } else {
+            c.innerHTML = '';
+        }
+    });
+    buttons.forEach(b => b.style.display = 'none');
+    {% endif %}
+}
+</script>
+{% endblock %}

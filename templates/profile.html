@@ -1,0 +1,629 @@
+{% extends "base.html" %}
+
+{% block title %}{{ user.username }} - Profile{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="display-5 fw-bold text-glow mb-2">
+                        <i class="fas fa-user me-2"></i>{{ user.username }}
+                    </h1>
+                    <p class="text-muted">
+                        <i class="fas fa-map-marker-alt me-1 text-danger"></i>
+                        {{ user.location }} • 
+                        <i class="fas fa-envelope me-1 text-primary"></i>
+                        {{ user.email }}
+                    </p>
+                </div>
+                <div class="text-end">
+                    <div class="ai-status trained">
+                        <i class="fas fa-robot me-1"></i>
+                        AI Active
+                    </div>
+                    <small class="text-muted">Member since {{ user.created_at[:10] }}</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- User Info & Preferences -->
+        <div class="col-lg-4">
+            <!-- User Card -->
+            <div class="card-futuristic mb-4">
+                <div class="card-header glass-effect">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-id-card me-2"></i>User Information
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="text-center mb-3">
+                        <div class="bg-primary rounded-circle d-flex align-items-center justify-content-center mx-auto" 
+                             style="width: 80px; height: 80px;">
+                            <i class="fas fa-user text-white fa-2x"></i>
+                        </div>
+                        <h4 class="mt-3 mb-1">{{ user.username }}</h4>
+                        <p class="text-muted">{{ user.email }}</p>
+                    </div>
+                    
+                    <div class="list-group list-group-flush">
+                        <div class="list-group-item bg-transparent text-light border-secondary d-flex justify-content-between">
+                            <span><i class="fas fa-map-marker-alt me-2 text-danger"></i>Location</span>
+                            <strong>{{ user.location }}</strong>
+                        </div>
+                        <div class="list-group-item bg-transparent text-light border-secondary d-flex justify-content-between">
+                            <span><i class="fas fa-calendar me-2 text-info"></i>Member Since</span>
+                            <strong>{{ user.created_at[:10] }}</strong>
+                        </div>
+                        <div class="list-group-item bg-transparent text-light border-secondary d-flex justify-content-between">
+                            <span><i class="fas fa-bell me-2 text-warning"></i>Active Alerts</span>
+                            <span class="badge bg-warning rounded-pill">{{ alerts|length }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Weather Preferences -->
+            <div class="card-futuristic">
+                <div class="card-header glass-effect">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-sliders-h me-2"></i>Weather Preferences
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if preferences %}
+                    <div class="mb-3">
+                        <small class="text-muted">Temperature Range</small>
+                        <div class="fw-bold">
+                            {{ preferences.temperature_min }}°C - {{ preferences.temperature_max }}°C
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <small class="text-muted">Preferred Activities</small>
+                        <div>
+                            {% for activity in preferences.preferred_activities %}
+                            <span class="badge bg-primary me-1 mb-1">{{ activity }}</span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <small class="text-muted">Avoidance Settings</small>
+                        <div>
+                            {% if preferences.avoid_rain %}
+                            <span class="badge bg-info me-1 mb-1">Avoid Rain</span>
+                            {% endif %}
+                            {% if preferences.avoid_extreme_heat %}
+                            <span class="badge bg-warning me-1 mb-1">Avoid Extreme Heat</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="text-center text-muted py-3">
+                        <i class="fas fa-sliders-h fa-2x mb-2"></i>
+                        <p>No preferences set</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="col-lg-8">
+            <!-- Current Weather -->
+            <div class="card-futuristic mb-4">
+                <div class="card-header glass-effect">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-cloud-sun me-2"></i>Current Weather in {{ user.location }}
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if weather_data %}
+                        {% set current_weather = weather_data[0] %}
+                        <div class="row align-items-center">
+                            <div class="col-md-4 text-center">
+                                <div class="weather-icon mb-2">
+                                    <i class="fas fa-{{ 'sun' if 'Sunny' in current_weather.weather_condition else 'cloud' if 'Cloud' in current_weather.weather_condition else 'cloud-rain' }} fa-3x"></i>
+                                </div>
+                                <h2 class="temperature temp-{{ 'cold' if current_weather.temperature < 10 else 'mild' if current_weather.temperature < 20 else 'warm' }} mb-0">
+                                    {{ "%.1f"|format(current_weather.temperature) }}°C
+                                </h2>
+                                <p class="text-muted">{{ current_weather.weather_condition }}</p>
+                            </div>
+                            <div class="col-md-8">
+                                <div class="row">
+                                    <div class="col-6 mb-3">
+                                        <small class="text-muted">Humidity</small>
+                                        <div class="fw-bold">{{ current_weather.humidity }}%</div>
+                                    </div>
+                                    <div class="col-6 mb-3">
+                                        <small class="text-muted">Wind Speed</small>
+                                        <div class="fw-bold">{{ current_weather.wind_speed }} km/h</div>
+                                    </div>
+                                    <div class="col-6">
+                                        <small class="text-muted">Pressure</small>
+                                        <div class="fw-bold">{{ current_weather.pressure }} hPa</div>
+                                    </div>
+                                    <div class="col-6">
+                                        <small class="text-muted">Last Updated</small>
+                                        <div class="fw-bold">{{ current_weather.recorded_at[11:16] }}</div>
+                                    </div>
+                                </div>
+                                
+                                <!-- AI Recommendation -->
+                                <div class="mt-3 p-3 glass-effect rounded">
+                                    <div class="d-flex align-items-center">
+                                        <i class="fas fa-robot text-primary me-3 fa-lg"></i>
+                                        <div>
+                                            <small class="text-muted">AI RECOMMENDATION</small>
+                                            <div class="fw-bold">
+                                                {% set temp_max = preferences.get('temperature_max', 30) %}
+                                                {% set temp_min = preferences.get('temperature_min', 15) %}
+                                                {% set prefs = preferences.get('preferred_activities') or [] %}
+                                                {% if current_weather.temperature > temp_max %}
+                                                Stay indoors, temperature is high
+                                                {% elif current_weather.temperature < temp_min %}
+                                                Wear warm clothing
+                                                {% else %}
+                                                Perfect weather for {{ prefs[0] if prefs else 'outdoor activities' }}
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    {% else %}
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-cloud fa-2x mb-2"></i>
+                            <p>No weather data available</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Recent Activities & Alerts -->
+            <div class="row g-4">
+                <!-- Recent Activities -->
+                <div class="col-md-6">
+                    <div class="card-futuristic h-100">
+                    <div class="card-header glass-effect d-flex justify-content-between align-items-center">
+                            <h5 class="card-title mb-0">
+                                <i class="fas fa-tractor me-2"></i>Recent Farm Activities
+                            </h5>
+                            <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal"
+                                    data-bs-target="#logActivityModal">
+                                <i class="fas fa-plus me-1"></i>Log Activity
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            {% set activity_icons = {
+                                'planting': 'fa-seedling', 'irrigation': 'fa-droplet',
+                                'harvesting': 'fa-wheat-awn', 'harvest': 'fa-wheat-awn',
+                                'disease_scan': 'fa-camera', 'pest_inspection': 'fa-bug',
+                                'soil_testing': 'fa-vial', 'fertilizing': 'fa-leaf',
+                                'weeding': 'fa-leaf', 'weather_check': 'fa-cloud-sun'
+                            } %}
+                            {% set activity_colors = {
+                                'planting': 'bg-success', 'irrigation': 'bg-info',
+                                'harvesting': 'bg-warning text-dark', 'harvest': 'bg-warning text-dark',
+                                'disease_scan': 'bg-primary', 'pest_inspection': 'bg-danger',
+                                'soil_testing': 'bg-secondary', 'fertilizing': 'bg-success',
+                                'weeding': 'bg-success', 'weather_check': 'bg-info'
+                            } %}
+                            {% if activities %}
+                                <div class="activity-feed">
+                                {% for activity in activities %}
+                                <div class="d-flex align-items-start border-bottom pb-2 mb-2 activity-item">
+                                    <div class="flex-shrink-0">
+                                        <div class="rounded-circle d-flex align-items-center justify-content-center {{ activity_colors.get(activity.activity_type, 'bg-secondary') }}"
+                                             style="width: 32px; height: 32px;">
+                                            <i class="fas {{ activity_icons.get(activity.activity_type, 'fa-history') }} text-white small"></i>
+                                        </div>
+                                    </div>
+                                    <div class="flex-grow-1 ms-3">
+                                        <div class="fw-bold">{{ activity.activity_type|replace('_', ' ')|title }}</div>
+                                        {% if activity.notes %}
+                                        <small class="text-muted d-block">{{ activity.notes }}</small>
+                                        {% endif %}
+                                        {% if activity.duration_minutes %}
+                                        <small class="text-muted">{{ activity.weather_condition or '—' }} • {{ activity.duration_minutes }}min</small>
+                                        {% else %}
+                                        <small class="text-muted">{{ activity.weather_condition or 'Field activity' }}</small>
+                                        {% endif %}
+                                    </div>
+                                    <div class="flex-shrink-0 text-end">
+                                        {% if activity.satisfaction_rating %}
+                                        <div class="text-warning mb-1">
+                                            {% for i in range(activity.satisfaction_rating) %}
+                                            <i class="fas fa-star fa-xs"></i>
+                                            {% endfor %}
+                                        </div>
+                                        {% endif %}
+                                        <small class="text-muted">{{ activity.activity_date[5:16] if activity.activity_date else '—' }}</small>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                                </div>
+                            {% else %}
+                                <div class="text-center text-muted py-3">
+                                    <i class="fas fa-history fa-2x mb-2"></i>
+                                    <p>No farming activities logged yet</p>
+                                    <button class="btn btn-futuristic btn-sm" data-bs-toggle="modal"
+                                            data-bs-target="#logActivityModal">
+                                        <i class="fas fa-plus me-1"></i>Log Your First Activity
+                                    </button>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Weather Alerts -->
+                <div class="col-md-6">
+                    <div class="card-futuristic h-100">
+                        <div class="card-header glass-effect">
+                            <h5 class="card-title mb-0">
+                                <i class="fas fa-bell me-2"></i>Weather Alerts
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            {% if alerts %}
+                                {% for alert in alerts %}
+                                <div class="alert alert-{{ 'danger' if alert.severity == 'High' else 'warning' if alert.severity == 'Medium' else 'info' }} glass-effect mb-2">
+                                    <div class="d-flex align-items-center">
+                                        <i class="fas fa-{{ 'exclamation-triangle' if alert.severity == 'High' else 'bell' }} me-2"></i>
+                                        <div class="flex-grow-1">
+                                            <strong>{{ alert.alert_type }}</strong>
+                                            <div class="small">{{ alert.message }}</div>
+                                        </div>
+                                        <small class="text-muted">{{ alert.created_at[:10] }}</small>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            {% else %}
+                                <div class="text-center text-muted py-3">
+                                    <i class="fas fa-bell-slash fa-2x mb-2"></i>
+                                    <p>No active alerts</p>
+                                    <button class="btn btn-futuristic btn-sm" data-bs-toggle="modal" data-bs-target="#addAlertModal">
+                                        <i class="fas fa-plus me-1"></i>Add Alert
+                                    </button>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notification Preferences -->
+            <div class="card-futuristic mb-4">
+                <div class="card-header glass-effect d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-sms me-2"></i>SMS &amp; WhatsApp Notifications
+                    </h5>
+                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal"
+                            data-bs-target="#notificationPrefsModal">
+                        <i class="fas fa-cog me-1"></i>Configure
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3 align-items-center">
+                        <div class="col-md-4">
+                            <div class="text-center p-3">
+                                <i class="fas fa-{{ 'sms' if user.notification_channel == 'sms' else 'whatsapp' }} fa-2x text-primary mb-2"></i>
+                                <div class="fw-bold">{{ 'SMS' if user.notification_channel == 'sms' else 'WhatsApp' if user.notification_channel == 'whatsapp' else 'SMS' }}</div>
+                                <small class="text-muted">Notification Channel</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="text-center p-3">
+                                <i class="fas fa-phone fa-2x text-teal mb-2"></i>
+                                <div class="fw-bold">{{ user.phone_number or '+1 (555) 123-4567' }}</div>
+                                <small class="text-muted">Phone Number</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="text-center p-3">
+                                <i class="fas fa-{{ 'check-circle' if user.notifications_enabled else 'pause-circle' }} fa-2x {{ 'text-success' if user.notifications_enabled else 'text-warning' }} mb-2"></i>
+                                <div class="fw-bold">{{ 'Active' if user.notifications_enabled else 'Paused' }}</div>
+                                <small class="text-muted">Status</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <button class="btn btn-outline-success btn-sm" onclick="sendTestNotification()">
+                            <i class="fas fa-paper-plane me-1"></i> Send Test Notification
+                        </button>
+                        <span id="testNotifyResult" class="text-muted small ms-2"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Add Alert Form -->
+            <div class="modal fade" id="addAlertModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content card-futuristic">
+                        <div class="modal-header glass-effect">
+                            <h5 class="modal-title">Add Weather Alert</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <form method="POST" action="{{ url_for('add_alert', user_id=user.user_id) }}">
+                                <div class="mb-3">
+                                    <label class="form-label">Alert Type</label>
+                                    <select class="form-select bg-dark text-light border-secondary" name="alert_type" required>
+                                        <option value="Temperature">Temperature Alert</option>
+                                        <option value="Wind">Wind Alert</option>
+                                        <option value="Rain">Rain Alert</option>
+                                        <option value="Storm">Storm Alert</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Severity</label>
+                                    <select class="form-select bg-dark text-light border-secondary" name="severity" required>
+                                        <option value="Low">Low</option>
+                                        <option value="Medium">Medium</option>
+                                        <option value="High">High</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Message</label>
+                                    <textarea class="form-control bg-dark text-light border-secondary" name="message" rows="3" required placeholder="Enter alert message..."></textarea>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Temperature Threshold (°C)</label>
+                                    <input type="number" class="form-control bg-dark text-light border-secondary" name="temp_threshold" value="30" step="0.1">
+                                </div>
+                                <div class="d-flex justify-content-end">
+                                    <button type="button" class="btn btn-outline-secondary me-2" data-bs-dismiss="modal">Cancel</button>
+                                    <button type="submit" class="btn btn-futuristic">Add Alert</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Log Farm Activity Form -->
+            <div class="modal fade" id="logActivityModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content card-futuristic">
+                        <div class="modal-header glass-effect">
+                            <h5 class="modal-title">Log Farming Activity</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <form id="logActivityForm" class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Activity Type</label>
+                                    <select class="form-select bg-dark text-light border-secondary" name="activity_type" required>
+                                        <option value="planting">🌱 Planting</option>
+                                        <option value="irrigation">💧 Irrigation</option>
+                                        <option value="fertilizing">🍃 Fertilizing</option>
+                                        <option value="weeding">🌿 Weeding</option>
+                                        <option value="pest_inspection">🐛 Pest Inspection</option>
+                                        <option value="soil_testing">🧪 Soil Testing</option>
+                                        <option value="disease_scan">📷 Disease Scan</option>
+                                        <option value="weather_check">☀️ Weather Check</option>
+                                        <option value="harvesting">🌾 Harvesting</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Duration (minutes)</label>
+                                    <input type="number" class="form-control bg-dark text-light border-secondary"
+                                           name="duration_minutes" min="1" placeholder="e.g. 30">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">Notes</label>
+                                    <textarea class="form-control bg-dark text-light border-secondary"
+                                              name="notes" rows="2"
+                                              placeholder="What did you observe?"></textarea>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">Satisfaction</label>
+                                    <select class="form-select bg-dark text-light border-secondary" name="satisfaction_rating">
+                                        <option value="5">⭐⭐⭐⭐⭐ - Excellent</option>
+                                        <option value="4">⭐⭐⭐⭐ - Good</option>
+                                        <option value="3">⭐⭐⭐ - Fair</option>
+                                        <option value="2">⭐⭐ - Poor</option>
+                                        <option value="1">⭐ - Very Poor</option>
+                                    </select>
+                                </div>
+                                <div class="d-flex justify-content-end">
+                                    <button type="button" class="btn btn-outline-secondary me-2"
+                                            data-bs-dismiss="modal">Cancel</button>
+                                    <button type="submit" class="btn btn-futuristic">Save Activity</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Notification Preferences Modal -->
+<div class="modal fade" id="notificationPrefsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content card-futuristic">
+            <div class="modal-header glass-effect">
+                <h5 class="modal-title">Notification Preferences</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="notificationPrefsForm">
+                    <div class="mb-3">
+                        <label class="form-label">Phone Number (E.164 format)</label>
+                        <input type="tel" class="form-control bg-dark text-light border-secondary"
+                               name="phone_number" placeholder="+15551234567"
+                               value="{{ user.phone_number or '' }}" required>
+                        <small class="text-muted">Include country code, e.g. +15551234567</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Notification Channel</label>
+                        <select class="form-select bg-dark text-light border-secondary" name="notification_channel">
+                            <option value="sms" {{ 'selected' if user.notification_channel == 'sms' else '' }}>SMS (Twilio)</option>
+                            <option value="whatsapp" {{ 'selected' if user.notification_channel == 'whatsapp' else '' }}>WhatsApp</option>
+                        </select>
+                        <small class="text-muted">Requires Twilio credentials configured in .env</small>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="notificationsEnabled"
+                                   {{ 'checked' if user.notifications_enabled else '' }}>
+                            <label class="form-check-label" for="notificationsEnabled">
+                                Enable notifications
+                            </label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Alert Types to Receive</label>
+                        <div class="d-flex flex-wrap gap-2">
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" name="alert_types" value="pest_risk" checked>
+                                <label class="form-check-label small">Pest Risk</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" name="alert_types" value="heat_stress" checked>
+                                <label class="form-check-label small">Heat Stress</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" name="alert_types" value="drought" checked>
+                                <label class="form-check-label small">Drought</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" name="alert_types" value="irrigation" checked>
+                                <label class="form-check-label small">Irrigation Due</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex justify-content-end">
+                        <button type="button" class="btn btn-outline-secondary me-2"
+                                data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-success">
+                            <i class="fas fa-save me-1"></i> Save Preferences
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Log farming activity form submission
+const logActivityForm = document.getElementById('logActivityForm');
+if (logActivityForm) {
+    logActivityForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const formData = new FormData(logActivityForm);
+        const payload = {
+            activity_type: formData.get('activity_type'),
+            duration_minutes: formData.get('duration_minutes') ? parseInt(formData.get('duration_minutes')) : null,
+            notes: formData.get('notes') || '',
+            satisfaction_rating: formData.get('satisfaction_rating') ? parseInt(formData.get('satisfaction_rating')) : null,
+            weather_condition: 'Field activity',
+            activity_date: new Date().toISOString()
+        };
+
+        try {
+            const response = await fetch('/api/agri/activity', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+
+            const modalEl = document.getElementById('logActivityModal');
+            if (window.bootstrap && modalEl) {
+                const bsModal = bootstrap.Modal.getInstance(modalEl);
+                if (bsModal) bsModal.hide();
+            }
+
+            if (response.ok) {
+                showNotification('✅ Activity logged!', 'success');
+                setTimeout(() => location.reload(), 1200);
+            } else {
+                showNotification('Error: ' + (data.message || 'Could not log activity'), 'error');
+            }
+        } catch (err) {
+            showNotification('Error: ' + err.message, 'error');
+        }
+    });
+}
+
+// Send test notification
+function sendTestNotification() {
+    const resultEl = document.getElementById('testNotifyResult');
+    resultEl.textContent = 'Sending…';
+    resultEl.className = 'text-warning';
+    fetch('/api/agri/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            activity_type: 'general',
+            message: 'This is a test notification from Smart AgriWeather. Your SMS/WhatsApp alerts are working!',
+            channel: '{{ user.notification_channel or "sms" }}',
+            phone_number: '{{ user.phone_number or "" }}'
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            resultEl.textContent = '✅ Test sent successfully!';
+            resultEl.className = 'text-success';
+        } else {
+            resultEl.textContent = '❌ ' + (data.error || data.message || 'Failed');
+            resultEl.className = 'text-danger';
+        }
+    })
+    .catch(err => {
+        resultEl.textContent = '❌ ' + err.message;
+        resultEl.className = 'text-danger';
+    });
+}
+
+// Save notification preferences
+const notificationPrefsForm = document.getElementById('notificationPrefsForm');
+if (notificationPrefsForm) {
+    notificationPrefsForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const formData = new FormData(notificationPrefsForm);
+        const phone = formData.get('phone_number');
+        const channel = formData.get('notification_channel');
+        const enabled = document.getElementById('notificationsEnabled').checked;
+
+        // Send a test notification with updated settings
+        fetch('/api/agri/notify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                activity_type: 'weather_check',
+                message: `Notification preferences saved: ${channel === 'sms' ? 'SMS' : 'WhatsApp'} to ${phone}${enabled ? '' : ' (notifications disabled)'}`,
+                channel: channel,
+                phone_number: phone
+            })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success || data.message_sid) {
+                showNotification('✅ Notification preferences saved!', 'success');
+            } else {
+                showNotification('❌ ' + (data.error || 'Failed'), 'error');
+            }
+        })
+        .catch(err => {
+            showNotification('❌ ' + err.message, 'error');
+        });
+    });
+}
+</script>
+{% endblock %}

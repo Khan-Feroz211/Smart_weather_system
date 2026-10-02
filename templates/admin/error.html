@@ -1,0 +1,10 @@
+{% extends "admin/_layout.html" %}
+{% block content %}
+<div class="a-card"><div class="a-card-b empty-state">
+  <i class="fa-solid fa-triangle-exclamation text-warning"></i>
+  <h5>{{ title or 'Something went wrong' }}</h5>
+  <p class="mb-3">{{ message }}</p>
+  <a class="btn btn-primary btn-sm" href="javascript:location.reload()"><i class="fa-solid fa-rotate me-1"></i>Retry</a>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin.dashboard') }}">Back to dashboard</a>
+</div></div>
+{% endblock %}

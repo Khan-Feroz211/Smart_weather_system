@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Welcome — Sign In or Sign Up{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-md-8 col-lg-5">
+  <div class="card card-futuristic"><div class="card-body p-4">
+
+    <div class="text-center mb-4">
+      <i class="fas fa-cloud-sun fa-3x text-primary mb-2"></i>
+      <h2 class="mb-1">Smart AgriWeather</h2>
+      <p class="text-muted small">Sign in to save your preferences and receive personalized alerts.</p>
+    </div>
+
+    <ul class="nav nav-pills justify-content-center mb-4" id="access-tab" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="login-tab" data-bs-toggle="pill" data-bs-target="#login-pane" type="button" role="tab">
+          <i class="fas fa-sign-in-alt me-1"></i>Sign In
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="signup-tab" data-bs-toggle="pill" data-bs-target="#signup-pane" type="button" role="tab">
+          <i class="fas fa-user-plus me-1"></i>Create Account
+        </button>
+      </li>
+    </ul>
+
+    <div class="tab-content" id="access-tab-content">
+
+      <!-- ===================== LOGIN ===================== -->
+      <div class="tab-pane fade show active" id="login-pane" role="tabpanel">
+        <form method="post" action="{{ url_for('auth.login') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="mb-3">
+            <label class="form-label" for="login-email">Email</label>
+            <input class="form-control" type="email" id="login-email" name="email" required autocomplete="email">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="login-password">Password</label>
+            <input class="form-control" type="password" id="login-password" name="password" required autocomplete="current-password">
+          </div>
+          {% if totp_available %}
+          <div class="alert alert-info alert-sm py-2 mb-3">
+            <i class="fas fa-shield-alt me-1"></i>If you have 2FA enabled, you will be prompted for your authenticator code after entering your password.
+          </div>
+          {% else %}
+          <div class="alert alert-warning alert-sm py-2 mb-3">
+            <i class="fas fa-exclamation-triangle me-1"></i>Two-factor authentication is not available on this server.
+          </div>
+          {% endif %}
+          <button class="btn btn-primary w-100" type="submit">
+            <i class="fas fa-sign-in-alt me-1"></i>Sign In
+          </button>
+        </form>
+      </div>
+
+      <!-- ===================== SIGNUP ===================== -->
+      <div class="tab-pane fade" id="signup-pane" role="tabpanel">
+        <form method="post" action="{{ url_for('auth.signup') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="mb-3">
+            <label class="form-label" for="signup-email">Email</label>
+            <input class="form-control" type="email" id="signup-email" name="email" required autocomplete="email">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="signup-password">Password</label>
+            <input class="form-control" type="password" id="signup-password" name="password" minlength="8" required autocomplete="new-password">
+            <div class="form-text">At least 8 characters.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="signup-username">Username <span class="text-muted small">(optional)</span></label>
+            <input class="form-control" id="signup-username" name="username" maxlength="30" autocomplete="nickname">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="signup-location">City <span class="text-muted small">(optional)</span></label>
+            <input class="form-control" id="signup-location" name="location" maxlength="80">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="signup-phone">Phone number <span class="text-muted small">(for alerts)</span></label>
+            <input class="form-control" type="tel" id="signup-phone" name="phone_number"
+                   placeholder="+15551234567" maxlength="20">
+            <div class="form-text">Include country code, e.g. +15551234567. Alerts sent via WhatsApp first, then SMS fallback.</div>
+          </div>
+          {% if totp_available %}
+          <div class="mb-3 d-flex align-items-start">
+            <div class="form-check form-switch mt-1 me-2">
+              <input class="form-check-input" type="checkbox" id="signup-2fa" name="enable_2fa" value="on">
+              <label class="form-check-label" for="signup-2fa">
+                <strong>Enable two-factor authentication</strong>
+              </label>
+            </div>
+            <div class="text-muted small ms-2">
+              <i class="fas fa-shield-alt me-1"></i>After sign-in you will scan a QR code with Google Authenticator or Authy.
+            </div>
+          </div>
+          {% else %}
+          <div class="mb-3">
+            <div class="alert alert-warning alert-sm mb-0">
+              <i class="fas fa-exclamation-triangle me-1"></i>Two-factor authentication requires the <code>pyotp</code> package, which is not installed on this server.
+            </div>
+          </div>
+          {% endif %}
+          <button class="btn btn-success w-100" type="submit">
+            <i class="fas fa-user-plus me-1"></i>Create Account
+          </button>
+        </form>
+      </div>
+
+    </div> <!-- /tab-content -->
+
+    <div class="text-center mt-3">
+      <small class="text-muted">
+        By continuing you agree to our Terms of Service and Privacy Policy.
+        <a href="/dashboard" class="small">Continue as guest</a>
+      </small>
+    </div>
+
+  </div></div></div></div></div>
+{% endblock %}

@@ -1,0 +1,662 @@
+{% extends "base.html" %}
+{% block title %}Agriculture Dashboard – Smart AgriWeather{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+
+  <!-- AgriAdvisor Connectivity & Status Banner (v6) -->
+  <div class="row mb-3">
+    <div class="col-12">
+      <div id="agriStatusBanner" class="alert alert-success d-flex align-items-center justify-content-between shadow-sm py-2 px-3 mb-0" role="alert">
+        <div class="d-flex align-items-center gap-2">
+          <i id="agriStatusIcon" class="fas fa-wifi text-success"></i>
+          <div>
+            <strong id="agriStatusHeader">[SIMULATED DATA | ONLINE]</strong>
+            <span id="agriStatusDetail" class="text-muted ms-2 small">Fresh telemetry available via Geovis & Weather Gateway</span>
+          </div>
+        </div>
+        <div class="d-flex align-items-center gap-3">
+          <!-- Socket Connection Status -->
+          <span class="badge bg-secondary" id="socketStatusBadge">
+            <i class="fas fa-plug me-1"></i><span id="socketStatusText">Connecting Socket...</span>
+          </span>
+          <!-- Low-Bandwidth Compact Mode Toggle (Gap 2c) -->
+          <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" id="compactModeToggle">
+            <label class="form-check-label small" for="compactModeToggle">Low-Bandwidth Mode</label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick Actions -->
+  <div class="row mb-4">
+    <div class="col-12">
+      <div class="d-flex gap-2 flex-wrap">
+        <a href="{{ url_for('add_farm') }}" class="btn btn-primary">
+          <i class="fas fa-plus me-1"></i> Add Farm
+        </a>
+        <a href="{{ url_for('satellite_map') }}" class="btn btn-outline-primary">
+          <i class="fas fa-satellite me-1"></i> Satellite Map
+        </a>
+        <a href="{{ url_for('agri_alerts_view') }}" class="btn btn-secondary">
+          <i class="fas fa-bell me-1"></i> Alerts
+        </a>
+        <a href="{{ url_for('farms_list') }}" class="btn btn-outline-primary">
+          <i class="fas fa-tractor me-1"></i> View All Farms
+        </a>
+        {% if notifications_sent > 0 %}
+          <a href="#" class="btn btn-success ms-auto" id="notifyBadge">
+            <i class="fas fa-sms me-1"></i> Alert: {{ notifications_sent }} SMS/WhatsApp sent
+          </a>
+        {% else %}
+          <span class="badge bg-secondary ms-auto" id="notifyStatus">
+            <i class="fas fa-wifi me-1"></i> Notifications: Auto-alert on high-risk
+          </span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+      <div class="metric-card">
+        <div class="metric-value">{{ total_farms }}</div>
+        <div class="metric-label">Total Farms</div>
+        <i class="fas fa-tractor text-muted position-absolute top-0 end-0 m-3 opacity-25"></i>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="metric-card">
+        <div class="metric-value">{{ total_fields }}</div>
+        <div class="metric-label">Active Fields</div>
+        <i class="fas fa-map text-muted position-absolute top-0 end-0 m-3 opacity-25"></i>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="metric-card">
+        <div class="metric-value {% if avg_health >= 75 %}text-teal{% elif avg_health >= 50 %}text-warning{% else %}text-danger{% endif %}">
+          {{ avg_health }}%
+        </div>
+        <div class="metric-label">Average Crop Health</div>
+        <i class="fas fa-heart-pulse text-muted position-absolute top-0 end-0 m-3 opacity-25"></i>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="metric-card">
+        <div class="metric-value text-warning">{{ active_alerts|length }}</div>
+        <div class="metric-label">Active Alerts</div>
+        <i class="fas fa-triangle-exclamation text-muted position-absolute top-0 end-0 m-3 opacity-25"></i>
+      </div>
+    </div>
+  </div>
+
+  <!-- Satellite Imagery Data -->
+  <div class="row g-4 mb-4" id="satelliteSection">
+    {% if satellite_data and satellite_data.available %}
+      <div class="col-lg-12">
+        <div class="card agri-theme-card h-100">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">
+              <i class="fas fa-satellite me-2 text-primary"></i>
+              Satellite Imagery — GeoVis Engine
+            </h5>
+            <span class="badge bg-info">{{ satellite_data.status }}</span>
+          </div>
+          <div class="card-body">
+            <div class="row g-4 text-center">
+              <div class="col-4">
+                <div class="p-3">
+                  <div class="fw-bold display-6 text-teal">
+                    {{ "%.2f"|format(satellite_data.data.ndvi) if satellite_data.data and satellite_data.data.ndvi else '–' }}
+                  </div>
+                  <small class="text-muted text-uppercase">NDVI</small>
+                  <div class="progress mt-2" style="height:6px;">
+                    <div class="bg-teal" style="width:{% if satellite_data.data and satellite_data.data.ndvi %}{{ (satellite_data.data.ndvi / 1.0 * 100)|round(0) }}%{% else %}0%{% endif %};"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-4">
+                <div class="p-3">
+                  <div class="fw-bold display-6 text-info">
+                    {{ "%.1f%%"|format((satellite_data.data.soil_moisture_index * 100)|round(1)) if satellite_data.data and satellite_data.data.soil_moisture_index else '–' }}
+                  </div>
+                  <small class="text-muted text-uppercase">Soil Moisture Index</small>
+                  <div class="progress mt-2" style="height:6px;">
+                    <div class="bg-info" style="width:{% if satellite_data.data and satellite_data.data.soil_moisture_index %}{{ (satellite_data.data.soil_moisture_index * 100)|round(0) }}%{% else %}0%{% endif %};"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-4">
+                <div class="p-3">
+                  <div class="fw-bold display-6 {% if satellite_data.data.canopy_stress == 'high_solar_load' %}text-danger{% elif satellite_data.data.canopy_stress == 'low' %}text-teal{% else %}text-warning{% endif %}">
+                    {{ satellite_data.data.canopy_stress|replace('_', ' ')|title if satellite_data.data and satellite_data.data.canopy_stress else '–' }}
+                  </div>
+                  <small class="text-muted text-uppercase">Canopy Stress</small>
+                </div>
+              </div>
+            </div>
+
+            {% if sat_radiation and sat_radiation.get('available') %}
+              <div class="row g-4 mt-3 pt-3 border-top">
+                <div class="col-12">
+                  <h6 class="mb-2 text-muted small fw-bold text-uppercase">
+                    Radiation Data (Open-Meteo)
+                  </h6>
+                  <div class="row g-3 text-center">
+                    <div class="col-4">
+                      <div class="fw-bold text-warning">
+                        {{ sat_radiation.summary.mean_shortwave_radiation if sat_radiation.summary else '–' }}
+                      </div>
+                      <small class="text-muted">Mean SW Radiation (W/m²)</small>
+                    </div>
+                    <div class="col-4">
+                      <div class="fw-bold text-primary">
+                        {{ sat_radiation.summary.mean_clear_sky_radiation if sat_radiation.summary else '–' }}
+                      </div>
+                      <small class="text-muted">Clear-Sky SW Radiation (W/m²)</small>
+                    </div>
+                    <div class="col-4">
+                      <div class="fw-bold text-info">
+                        {{ sat_radiation.summary.data_points if sat_radiation.summary else '–' }}
+                      </div>
+                      <small class="text-muted">Data Points (7-day)</small>
+                    </div>
+                  </div>
+                  {% if sat_radiation.get('attribution') %}
+                    <div class="mt-2">
+                      <small class="text-muted fst-italic">{{ sat_radiation.attribution }}</small>
+                    </div>
+                  {% endif %}
+                </div>
+              </div>
+            {% endif %}
+
+            <div class="mt-3">
+              <small class="text-muted fst-italic">
+                <i class="fas fa-info-circle me-1"></i>
+                {{ satellite_data.disclaimer if satellite_data.disclaimer else 'Satellite data provided by Geovis Engine.' }}
+              </small>
+            </div>
+          </div>
+        </div>
+      </div>
+    {% else %}
+      <div class="col-lg-12">
+        <div class="card agri-theme-card h-100">
+          <div class="card-header">
+            <h5 class="mb-0">
+              <i class="fas fa-satellite me-2 text-muted"></i>
+              Satellite Imagery
+            </h5>
+          </div>
+          <div class="card-body text-center py-4">
+            <i class="fas fa-cloud-slash fa-2x text-muted mb-2"></i>
+            <p class="text-muted mb-0">Satellite data unavailable — operating in offline/cached mode.</p>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="row g-4">
+
+    <!-- Field Health Overview -->
+    <div class="col-lg-7">
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0"><i class="fas fa-leaf me-2 text-teal"></i>Field Health Overview</h5>
+          <a href="{{ url_for('farms_list') }}" class="btn btn-sm btn-outline-primary">View All</a>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table mb-0">
+              <thead>
+                <tr>
+                  <th>Field</th>
+                  <th>Crop / Stage</th>
+                  <th>Health</th>
+                  <th>Stress Factors</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if health_rows %}
+                  {% for row in health_rows %}
+                  <tr>
+                    <td>
+                      <div class="fw-bold">{{ row.name }}</div>
+                      <small class="text-muted">{{ row.farm_name }}</small>
+                    </td>
+                    <td>
+                      {% if row.crop_type %}
+                        <span class="badge bg-teal">{{ row.crop_type }}</span><br>
+                        <small class="text-muted">{{ row.growth_stage }}</small>
+                      {% else %}<span class="text-muted">–</span>{% endif %}
+                    </td>
+                    <td>
+                      {% set hs = row.health_score or 0 %}
+                      <div class="fw-bold {% if hs >= 75 %}text-teal{% elif hs >= 50 %}text-warning{% else %}text-danger{% endif %}">
+                        {{ "%.0f"|format(hs) }}%
+                      </div>
+                      <div class="health-bar mt-1">
+                        <div class="health-bar-fill {% if hs >= 75 %}health-excellent{% elif hs >= 50 %}health-good{% elif hs >= 25 %}health-fair{% else %}health-poor{% endif %}"
+                             style="width:{{ hs }}%"></div>
+                      </div>
+                    </td>
+                    <td>
+                      {% if row.heat_stress and row.heat_stress > 0.1 %}
+                        <span class="stress-indicator stress-high me-1" title="Heat stress">🌡️</span>
+                      {% endif %}
+                      {% if row.frost_risk and row.frost_risk > 0.1 %}
+                        <span class="stress-indicator stress-low me-1" title="Frost risk">❄️</span>
+                      {% endif %}
+                      {% if row.drought_stress and row.drought_stress > 0.1 %}
+                        <span class="stress-indicator stress-high me-1" title="Drought">🏜️</span>
+                      {% endif %}
+                      {% if row.excess_moisture and row.excess_moisture > 0.1 %}
+                        <span class="stress-indicator stress-medium me-1" title="Excess moisture">💧</span>
+                      {% endif %}
+                      {% if not (row.heat_stress or row.frost_risk or row.drought_stress or row.excess_moisture) %}
+                        <span class="text-muted small">–</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      <a href="{{ url_for('field_detail', field_id=row.field_id) }}"
+                         class="btn btn-sm btn-primary">View</a>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr><td colspan="5" class="text-center text-muted py-4">No fields registered yet.
+                    <a href="{{ url_for('add_farm') }}">Add a farm</a> to get started.
+                  </td></tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active Alerts -->
+    <div class="col-lg-5">
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0"><i class="fas fa-bell me-2 text-warning"></i>Active Alerts</h5>
+          <a href="{{ url_for('agri_alerts_view') }}" class="btn btn-sm btn-outline-secondary">View All</a>
+        </div>
+        <div class="card-body" style="max-height:360px;overflow-y:auto;">
+          {% if active_alerts %}
+            {% for alert in active_alerts %}
+            <div class="alert alert-{{ 'danger' if alert.severity in ['critical', 'high'] else 'warning' if alert.severity == 'medium' else 'info' }} mb-2">
+              <div class="d-flex align-items-start">
+                <div class="flex-shrink-0 me-2">
+                  {% if alert.severity == 'critical' %}
+                    <i class="fas fa-exclamation-circle"></i>
+                  {% elif alert.severity == 'high' %}
+                    <i class="fas fa-exclamation-triangle"></i>
+                  {% else %}
+                    <i class="fas fa-info-circle"></i>
+                  {% endif %}
+                </div>
+                <div class="flex-grow-1">
+                  <div class="fw-bold">{{ alert.alert_type }}</div>
+                  <div class="small">{{ alert.message }}</div>
+                  <div class="text-muted" style="font-size:0.75rem;">
+                    {% if alert.field_name %}📍 {{ alert.field_name }} ·{% endif %}
+                    {{ alert.farm_name or '–' }}
+                  </div>
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+            <div class="text-center text-muted py-4">
+              <i class="fas fa-check-circle fa-2x text-teal mb-2"></i>
+              <p>No active alerts – all clear!</p>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Pending Irrigation -->
+    <div class="col-lg-5">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="mb-0"><i class="fas fa-droplet me-2 text-teal"></i>Pending Irrigation</h5>
+        </div>
+        <div class="card-body">
+          {% if pending_irrigation %}
+            {% for rec in pending_irrigation %}
+            <a href="{{ url_for('field_detail', field_id=rec.field_id) }}" class="text-decoration-none">
+              <div class="d-flex align-items-center mb-3 pb-3 border-bottom clickable-card">
+                <div class="me-3">
+                  <div class="bg-teal bg-opacity-10 p-2 rounded-circle">
+                    <i class="fas fa-droplet text-teal"></i>
+                  </div>
+                </div>
+                <div class="flex-grow-1">
+                  <div class="fw-bold">{{ rec.field_name }}</div>
+                  <div class="text-muted small">{{ rec.farm_name }}</div>
+                  <div class="text-teal">{{ rec.volume_mm }} mm needed</div>
+                  <div class="text-muted" style="font-size:0.75rem;">{{ rec.reason }}</div>
+                  <small class="text-muted">Click for details →</small>
+                </div>
+              </div>
+            </a>
+            {% endfor %}
+          {% else %}
+            <p class="text-muted text-center py-3">No pending irrigation tasks.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- High Pest Risks -->
+    <div class="col-lg-4">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="mb-0"><i class="fas fa-bug me-2 text-danger"></i>Pest Risks</h5>
+        </div>
+        <div class="card-body">
+          {% if high_risks %}
+            {% for r in high_risks %}
+            <a href="{{ url_for('field_detail', field_id=r.field_id) }}" class="text-decoration-none">
+              <div class="stress-indicator stress-high mb-2 clickable-card">
+                <div class="fw-bold">{{ r.pest_type }}</div>
+                <div class="small">{{ r.field_name }}</div>
+                <div class="text-muted" style="font-size:0.75rem;">{{ r.warning_message }}</div>
+                <small class="text-muted">Click for details →</small>
+              </div>
+            </a>
+            {% endfor %}
+          {% else %}
+            <p class="text-muted text-center py-3">No high-risk pests detected.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Yield Forecasts -->
+    <div class="col-lg-3">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="mb-0"><i class="fas fa-chart-bar me-2 text-primary"></i>Yield Forecast</h5>
+        </div>
+        <div class="card-body">
+          {% if yield_summary %}
+            {% for yf in yield_summary %}
+            <a href="{{ url_for('field_detail', field_id=yf.field_id) }}" class="text-decoration-none">
+              <div class="mb-3 clickable-card">
+                <div class="d-flex justify-content-between small">
+                  <span class="fw-bold">{{ yf.field_name }}</span>
+                  <span class="badge bg-teal">{{ yf.crop_type or '–' }}</span>
+                </div>
+                <div class="small">
+                  <span class="text-teal">{{ yf.expected_yield_ton_ha }} t/ha</span>
+                  <span class="text-muted"> / target {{ yf.target_yield_ton_ha }} t/ha</span>
+                </div>
+                <div class="health-bar mt-1">
+                  {% set pct = [(yf.expected_yield_ton_ha / yf.target_yield_ton_ha * 100)|int, 100]|min %}
+                  <div class="health-bar-fill health-good" style="width:{{ pct }}%"></div>
+                </div>
+                <div class="text-muted" style="font-size:0.7rem;">
+                  Confidence: {{ (yf.confidence * 100)|int }}%
+                </div>
+                <small class="text-muted">Click for details →</small>
+              </div>
+            </a>
+            {% endfor %}
+          {% else %}
+            <p class="text-muted text-center py-3">No forecasts yet.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Analytics Charts -->
+    <div class="col-lg-10 mt-4 mx-auto mx-lg-0">
+      <div class="card analytics-card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0"><i class="fas fa-chart-line me-2 text-primary"></i>Analytics Overview</h5>
+          <small class="text-muted">Last updated {{ now.strftime('%H:%M') if now else '—' }}</small>
+        </div>
+        <div class="card-body">
+          <div class="row g-4">
+            <div class="col-md-6">
+              <h6 class="mb-2 text-muted small fw-bold text-uppercase">Crop Health by Field</h6>
+              <div class="chart-container">
+                <canvas id="healthChart"></canvas>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <h6 class="mb-2 text-muted small fw-bold text-uppercase">Yield Forecast vs Target</h6>
+              <div class="chart-container">
+                <canvas id="yieldChart"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Farm Activities -->
+    <div class="col-lg-12 mt-4">
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0"><i class="fas fa-tractor me-2 text-primary"></i>Recent Farm Activities</h5>
+          <a href="{{ url_for('user_profile', user_id=1) }}" class="btn btn-sm btn-outline-secondary">View Profile</a>
+        </div>
+        <div class="card-body p-0" style="max-height:320px;overflow-y:auto;">
+          {% set activity_icons = {
+            'planting': 'fa-seedling', 'irrigation': 'fa-droplet',
+            'harvesting': 'fa-wheat-awn', 'harvest': 'fa-wheat-awn',
+            'disease_scan': 'fa-camera', 'pest_inspection': 'fa-bug',
+            'soil_testing': 'fa-vial', 'fertilizing': 'fa-leaf',
+            'weeding': 'fa-leaf', 'weather_check': 'fa-cloud-sun'
+          } %}
+          {% set activity_colors = {
+            'planting': 'bg-success', 'irrigation': 'bg-info',
+            'harvesting': 'bg-warning text-dark', 'harvest': 'bg-warning text-dark',
+            'disease_scan': 'bg-primary', 'pest_inspection': 'bg-danger',
+            'soil_testing': 'bg-secondary', 'fertilizing': 'bg-success',
+            'weeding': 'bg-success', 'weather_check': 'bg-info'
+          } %}
+          {% if recent_activities %}
+            <ul class="list-group list-group-flush activity-feed">
+              {% for activity in recent_activities %}
+              <li class="list-group-item d-flex align-items-start py-2 border-0 border-bottom">
+                <div class="flex-shrink-0">
+                  <div class="rounded-circle d-flex align-items-center justify-content-center {{ activity_colors.get(activity.activity_type, 'bg-secondary') }}"
+                       style="width:32px;height:32px;">
+                    <i class="fas {{ activity_icons.get(activity.activity_type, 'fa-history') }} text-white small"></i>
+                  </div>
+                </div>
+                <div class="flex-grow-1 ms-3">
+                  <div class="fw-bold small">{{ activity.activity_type|replace('_', ' ')|title }}</div>
+                  {% if activity.notes %}
+                  <small class="text-muted d-block">{{ activity.notes }}</small>
+                  {% else %}
+                  <small class="text-muted">{{ activity.weather_condition or 'Field activity' }}</small>
+                  {% endif %}
+                </div>
+                <div class="flex-shrink-0 text-end">
+                  <small class="text-muted">{{ activity.activity_date[5:16] if activity.activity_date else '—' }}</small>
+                </div>
+              </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="text-center text-muted py-4">
+              <i class="fas fa-history fa-2x mb-2"></i>
+              <p class="mb-0 small">No farming activities logged yet.</p>
+              <p class="small">Activities logged from the Disease Scanner, Irrigation tracker, and profile will appear here.</p>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /row -->
+</div>
+
+<script>
+// Analytics Charts
+document.addEventListener('DOMContentLoaded', function() {
+    // Read CSS variables once so Chart.js uses the correct theme colours
+    const _style = getComputedStyle(document.documentElement);
+    const _c = (name) => _style.getPropertyValue(name).trim() || '#64748b';
+    const COLORS = {
+        success:   _c('--color-success'),
+        warning:   _c('--color-warning'),
+        danger:    _c('--color-danger'),
+        teal:      _c('--color-teal'),
+        primary:   _c('--color-primary'),
+        textMuted: _c('--color-text-muted'),
+        surface:   _c('--color-surface'),
+    };
+    const tooltipBg = 'rgba(6,78,59,0.9)';
+    const gridColor = 'rgba(0,0,0,0.05)';
+
+    // ---- Crop Health Chart ----
+    const healthCtx = document.getElementById('healthChart');
+    if (healthCtx) {
+        const healthData = {{ health_rows|tojson }};
+        const fieldNames = healthData.map(r => r.name);
+        const healthScores = healthData.map(r => r.health_score || 0);
+
+        new Chart(healthCtx, {
+            type: 'bar',
+            data: {
+                labels: fieldNames,
+                datasets: [{
+                    label: 'Health Score (%)',
+                    data: healthScores,
+                    backgroundColor: healthScores.map(score =>
+                        score >= 75 ? COLORS.success : score >= 50 ? COLORS.warning : COLORS.danger
+                    ),
+                    borderColor: '#ffffff',
+                    borderWidth: 1,
+                    borderRadius: { topLeft: 6, topRight: 6, bottomLeft: 6, bottomRight: 6 },
+                    barThickness: 28,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: tooltipBg,
+                        borderColor: COLORS.teal,
+                        padding: 8,
+                        callbacks: {
+                            label: ctx => `${ctx.dataset.label}: ${ctx.formattedValue}%`
+                        }
+                    },
+                    datalabels: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        grid: { drawBorder: false, color: gridColor },
+                        ticks: {
+                            callback: function(value) { return value + '%'; },
+                            color: COLORS.textMuted,
+                            font: { size: 11 }
+                        }
+                    },
+                    x: {
+                        grid: { display: false },
+                        ticks: {
+                            color: COLORS.textMuted,
+                            font: { size: 11 },
+                            maxRotation: 30,
+                            minRotation: 30
+                        }
+                    }
+                },
+                animation: { duration: 800, easing: 'easeOutQuart' }
+            }
+        });
+    }
+
+    // ---- Yield Forecast Chart ----
+    const yieldCtx = document.getElementById('yieldChart');
+    if (yieldCtx) {
+        const yieldData = {{ yield_summary|tojson }};
+        const fieldNames = yieldData.map(y => y.field_name);
+        const expectedYields = yieldData.map(y => y.expected_yield_ton_ha);
+        const targetYields = yieldData.map(y => y.target_yield_ton_ha);
+
+        new Chart(yieldCtx, {
+            type: 'bar',
+            data: {
+                labels: fieldNames,
+                datasets: [
+                    {
+                        label: 'Expected Yield',
+                        data: expectedYields,
+                        backgroundColor: COLORS.teal,
+                        borderColor: '#ffffff',
+                        borderWidth: 1,
+                        borderRadius: { topLeft: 4, topRight: 0, bottomLeft: 4, bottomRight: 0 },
+                        barPercentage: 0.55
+                    },
+                    {
+                        label: 'Target Yield',
+                        data: targetYields,
+                        backgroundColor: COLORS.primary,
+                        borderColor: '#ffffff',
+                        borderWidth: 1,
+                        borderRadius: { topLeft: 0, topRight: 4, bottomLeft: 0, bottomRight: 4 },
+                        barPercentage: 0.55
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top', labels: { color: COLORS.textMuted, font: { size: 12 } } },
+                    tooltip: {
+                        backgroundColor: tooltipBg,
+                        borderColor: COLORS.teal,
+                        padding: 8,
+                        callbacks: {
+                            label: ctx => `${ctx.dataset.label}: ${ctx.formattedValue} t/ha`
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: { drawBorder: false, color: gridColor },
+                        ticks: {
+                            callback: function(value) { return value + ' t/ha'; },
+                            color: COLORS.textMuted,
+                            font: { size: 11 }
+                        }
+                    },
+                    x: {
+                        grid: { display: false },
+                        ticks: {
+                            color: COLORS.textMuted,
+                            font: { size: 11 },
+                            maxRotation: 30,
+                            minRotation: 30
+                        }
+                    }
+                },
+                animation: { duration: 800, easing: 'easeOutQuart' }
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

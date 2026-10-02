@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Create account - Smart AgriWeather{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-md-6 col-lg-4">
+  <div class="card card-futuristic"><div class="card-body p-4">
+    <h4 class="mb-1"><i class="fas fa-user-plus me-2"></i>Create account</h4>
+    <p class="text-muted small mb-4">Passwords are handled by Supabase Auth and never stored by this app.</p>
+    <form method="post" action="{{ url_for('auth.signup') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="mb-3"><label class="form-label" for="email">Email</label>
+        <input class="form-control" type="email" id="email" name="email" value="{{ email or '' }}" required autocomplete="email"></div>
+      <div class="mb-3"><label class="form-label" for="username">Username <span class="text-muted small">(optional)</span></label>
+        <input class="form-control" id="username" name="username" value="{{ username or '' }}" maxlength="30" autocomplete="nickname"></div>
+      <div class="mb-3"><label class="form-label" for="location">City <span class="text-muted small">(optional)</span></label>
+        <input class="form-control" id="location" name="location" value="{{ location or '' }}" maxlength="80"></div>
+      <div class="mb-3"><label class="form-label" for="phone_number">Phone number <span class="text-muted small">(for alerts)</span></label>
+        <input class="form-control" type="tel" id="phone_number" name="phone_number" value="{{ phone_number or '' }}"
+               placeholder="+15551234567" maxlength="20">
+        <div class="form-text">Include country code, e.g. +15551234567. We'll send weather alerts via WhatsApp (or SMS if WhatsApp is unavailable).</div></div>
+      <div class="mb-3"><label class="form-label" for="password">Password</label>
+        <input class="form-control" type="password" id="password" name="password" minlength="8" required autocomplete="new-password">
+        <div class="form-text">At least 8 characters.</div></div>
+      {% if not totp_available %}
+      <div class="mb-3">
+        <div class="alert alert-warning alert-sm mb-0">
+          <i class="fas fa-exclamation-triangle me-1"></i>
+          Two-factor authentication requires the <code>pyotp</code> package, which is not installed on this server.
+          <a href="{{ url_for('auth.signup') }}" class="alert-link">Continue without 2FA</a>
+        </div>
+      </div>
+      {% else %}
+      <div class="mb-3 d-flex align-items-start">
+        <div class="form-check form-switch mt-1 me-2">
+          <input class="form-check-input" type="checkbox" id="enable_2fa" name="enable_2fa"
+                 {{ 'checked' if enable_2fa else '' }}>
+          <label class="form-check-label" for="enable_2fa">
+            <strong>Enable two-factor authentication</strong>
+          </label>
+        </div>
+        <div class="text-muted small ms-2"><i class="fas fa-shield-alt me-1"></i>After sign-in you'll scan a QR code with Google Authenticator / Authy for an extra layer of security.</div>
+      </div>
+      {% endif %}
+      <button class="btn btn-primary w-100" type="submit">Create account</button>
+    </form>
+    <p class="small text-center mt-3 mb-0">Already registered? <a href="{{ url_for('auth.login') }}">Sign in</a></p>
+  </div></div>
+</div></div>
+{% endblock %}
