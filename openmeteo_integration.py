@@ -127,9 +127,10 @@ def fetch_satellite_data(
     lat, lon = _coords(location)
 
     if start_date is None:
-        start_date = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
+        # Include recent history window ending today by default.
+        start_date = (datetime.utcnow() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
     if end_date is None:
-        end_date = (datetime.utcnow() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+        end_date = datetime.utcnow().strftime("%Y-%m-%d")
 
     try:
         resp = requests.get(
@@ -151,6 +152,8 @@ def fetch_satellite_data(
             swr = hourly.get("shortwave_radiation", [])
             swr_cs = hourly.get("shortwave_radiation_clear_sky", [])
             times = hourly.get("time", [])
+            swr_values = [v for v in swr if isinstance(v, (int, float))]
+            swr_cs_values = [v for v in swr_cs if isinstance(v, (int, float))]
             return {
                 "available": True,
                 "source": "openmeteo_satellite_api",
@@ -166,8 +169,8 @@ def fetch_satellite_data(
                     "shortwave_radiation_clear_sky": swr_cs,
                 },
                 "summary": {
-                    "mean_shortwave_radiation": round(sum(swr) / len(swr), 2) if swr else 0.0,
-                    "mean_clear_sky_radiation": round(sum(swr_cs) / len(swr_cs), 2) if swr_cs else 0.0,
+                    "mean_shortwave_radiation": round(sum(swr_values) / len(swr_values), 2) if swr_values else 0.0,
+                    "mean_clear_sky_radiation": round(sum(swr_cs_values) / len(swr_cs_values), 2) if swr_cs_values else 0.0,
                     "data_points": len(times),
                 },
                 "attribution": "Data © Open-Meteo (CC BY 4.0)",

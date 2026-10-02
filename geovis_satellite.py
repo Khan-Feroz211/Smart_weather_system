@@ -11,6 +11,9 @@ and clear-sky radiation data (no API key required — CC BY 4.0 attribution).
 from typing import Dict, Any, Optional
 from datetime import datetime
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 class GeoVisSatelliteAnalyzer:
     """
@@ -60,8 +63,10 @@ class GeoVisSatelliteAnalyzer:
                 geo_info = geocode_location(location)
                 if geo_info:
                     openmeteo_data = fetch_satellite_data(location, days=7)
-            except Exception:
-                pass
+                else:
+                    logger.warning("Open-Meteo geocoding returned no coordinates for '%s'", location)
+            except Exception as exc:
+                logger.warning("Open-Meteo satellite augmentation failed: %s", exc)
 
         if state == "CACHE":
             cached = self.cached_imagery.get("default")

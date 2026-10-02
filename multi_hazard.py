@@ -174,6 +174,13 @@ HAZARD_ACTIONS = {
     ],
 }
 
+URDU_HAZARD_NAMES = {
+    "extreme_heat_heatwave": "شدید گرمی",
+    "extreme_cold_frost": "پالا",
+    "heavy_rain_flood": "شدید بارش/سیلاب",
+    "high_wind_storm": "تیز ہوا/طوفان",
+}
+
 
 # ============================================================================
 # Multi-Hazard Classifier
@@ -599,6 +606,20 @@ class CrisisCommunicationSystem:
         else:
             names = " + ".join([HAZARD_NAMES[h].split("/")[0] for h in hazards])
             return f"⚠️ {names} - {alert['location']} - MULTIPLE HAZARDS. Take action now."
+
+    def generate_urdu_sms_alert(self, alert: Dict[str, Any]) -> str:
+        """Generate a compact Urdu SMS for offline orange/red alerts.
+
+        The conditional reserve keeps the message actionable while the final
+        slice guarantees compatibility with the 160-character SMS limit.
+        """
+        if not alert.get("alert_required") or alert.get("overall_risk_level") not in ("orange", "red"):
+            return ""
+        hazards = alert.get("active_hazards") or []
+        names = "، ".join(URDU_HAZARD_NAMES.get(h, "موسمی خطرہ") for h in hazards[:2])
+        risk = "شدید" if alert.get("overall_risk_level") == "red" else "زیادہ"
+        message = f"انتباہ: {alert.get('location', 'علاقہ')} میں {names} کا {risk} خطرہ۔ فصل اور مویشی محفوظ کریں۔ اگر ممکن ہو تو محفوظ مقام پر جائیں۔"
+        return message[:160]
 
     def generate_voice_prompt(self, alert: Dict[str, Any]) -> str:
         """

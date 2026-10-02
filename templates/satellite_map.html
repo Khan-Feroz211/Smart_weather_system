@@ -6,12 +6,12 @@
   <div class="row mb-3">
     <div class="col-12">
       <div class="d-flex justify-content-between align-items-center">
-        <h3 class="mb-0"><i class="fas fa-satellite me-2 text-primary"></i>Satellite Map &amp; Navigation</h3>
+        <h3 class="mb-0"><i class="fas fa-satellite me-2 text-primary"></i><span data-i18n="map_title">Satellite Map &amp; Navigation</span></h3>
         <a href="{{ url_for('agri_dashboard') }}" class="btn btn-sm btn-outline-secondary">
-          <i class="fas fa-arrow-left me-1"></i> Back to Dashboard
+          <i class="fas fa-arrow-left me-1"></i> <span data-i18n="back_dashboard">Back to Dashboard</span>
         </a>
       </div>
-      <small class="text-muted">High-resolution satellite imagery with farm locations — navigate and explore your fields</small>
+      <small class="text-muted" data-i18n="map_subtitle">High-resolution satellite imagery with farm locations — navigate and explore your fields</small>
     </div>
   </div>
 
@@ -19,7 +19,7 @@
     <div class="col-12">
       <div class="card agri-theme-card h-100">
         <div class="card-header d-flex justify-content-between align-items-center">
-          <h5 class="mb-0"><i class="fas fa-map me-2"></i>Farm Locations Map</h5>
+          <h5 class="mb-0"><i class="fas fa-map me-2"></i><span data-i18n="farm_locations">Farm Locations Map</span></h5>
           <div class="d-flex gap-2 align-items-center">
             <select class="form-select form-select-sm" id="tileLayerSelect" style="max-width:200px;">
               <option value="esri">ESRI World Imagery (Satellite)</option>
@@ -27,12 +27,25 @@
               <option value="osm">OpenStreetMap</option>
               <option value="dark">CartoDB Dark Matter</option>
             </select>
-            <span class="badge bg-info" id="mapStatusBadge">Loading…</span>
+            <label class="form-check form-switch mb-0 small">
+              <input class="form-check-input" type="checkbox" id="windOverlayToggle" checked>
+              <span class="form-check-label" data-i18n="map.wind_particles">Wind particles</span>
+            </label>
+            <button class="btn btn-sm btn-outline-primary" id="locateMeBtn" type="button" title="Show my location">
+              <i class="fas fa-location-dot"></i> <span data-i18n="map.user_location">Your location</span>
+            </button>
+            <span class="badge bg-info" id="mapStatusBadge" data-i18n="map_ready">Ready</span>
           </div>
         </div>
         <div class="card-body p-0">
-          <div id="satelliteMap" style="height: 650px; width: 100%;"></div>
-        </div>
+          <div id="satelliteMap" style="height: 560px; width: 100%;"></div>
+          <div class="px-3 py-2 border-top">
+            <h6 class="mb-1"><i class="fas fa-satellite me-1"></i><span id="satellitePanelHeader" data-i18n="map.live_data">Live Satellite Data</span></h6>
+            <div id="satelliteLiveData" class="small text-muted fst-italic">
+              <i class="fas fa-map-marker-alt me-1"></i>Select a farm/field on the map or enable location to view live satellite radiation data.
+            </div>
+            <small class="text-muted fst-italic mt-1 d-block">Data © Open-Meteo (CC BY 4.0) — no API key required</small>
+          </div>
       </div>
     </div>
   </div>
@@ -42,21 +55,21 @@
     <div class="col-12">
       <div class="card agri-theme-card">
         <div class="card-header">
-          <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i>Map Legend</h5>
+          <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i><span data-i18n="legend">Map Legend</span></h5>
         </div>
         <div class="card-body">
           <div class="d-flex flex-wrap gap-4">
             <div class="d-flex align-items-center gap-2">
               <i class="fas fa-map-marker-alt fa-lg text-danger"></i>
-              <span><strong>Farm</strong> — Farm location with owner details</span>
+              <span><strong data-i18n="farm">Farm</strong> — <span data-i18n="farm_legend">Farm location with owner details</span></span>
             </div>
             <div class="d-flex align-items-center gap-2">
               <i class="fas fa-circle-notch fa-lg text-teal"></i>
-              <span><strong>Field</strong> — Individual field within a farm</span>
+              <span><strong data-i18n="field">Field</strong> — <span data-i18n="field_legend">Individual field within a farm</span></span>
             </div>
             <div class="d-flex align-items-center gap-2">
               <i class="fas fa-layer-group fa-lg text-info"></i>
-              <span><strong>Satellite View</strong> — High-resolution aerial imagery (ESRI)</span>
+              <span><strong data-i18n="satellite_view">Satellite View</strong> — <span data-i18n="satellite_legend">High-resolution aerial imagery (ESRI)</span></span>
             </div>
           </div>
         </div>
@@ -66,9 +79,7 @@
 </div>
 
 <!-- Leaflet CSS (CDN) -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxB2LRU1mdnx4PBW+0XhE8Ff8rF0b4J6Q5z7y4z0c="
-      crossorigin=""/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
 <style>
   /* Fix Leaflet attribution on dark themes */
   #satelliteMap .leaflet-control-zoom {
@@ -81,118 +92,24 @@
   .leaflet-container {
     font-family: var(--font-family, 'Inter', sans-serif);
   }
+  .wind-particle-canvas {
+    position: absolute;
+    inset: 0;
+    z-index: 400;
+  }
 </style>
 
 <!-- Leaflet JS (CDN) -->
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-        integrity="sha256-20KoQhZ+5k7Q7Z5m7L7Z5m7L7n2L5m5Q5z5Q5z5Q5z="
-        crossorigin=""></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 {% endblock %}
 
 {% block scripts %}
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const map = L.map('satelliteMap').setView([30.3769, 69.3478], 6); // Pakistan center
-
-    // Tile layers
-    const tiles = {
-        esri: L.tileLayer('https://server.arcgise.com/102e33a85f6e4fda89dc2cd8541a2543/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-            attribution: '© <a href="http://downloads.hydroatlas.it/~39BCN/SRTM90/</a> | Tiles &copy; Esri',
-            maxZoom: 19,
-            maxNativeZoom: 17,
-        }),
-        'esri-labels': L.layerGroup().addLayer(L.tileLayer('https://server.arcgise.com/102e33a85f6e4fda89dc2cd8541a2543/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-            attribution: '© <a href="http://downloads.hydroatlas.it/~39BCN/SRTM90/</a> | Tiles &copy; Esri',
-            maxZoom: 19,
-            maxNativeZoom: 17,
-        })).addLayer(L.tileLayer('https://server.arcgise.com/102e33a85f6e4fda89dc2cd8541a2543/ArcGIS/rest/services/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-            transparent: true,
-            attribution: '',
-        })),
-        osm: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-            maxZoom: 19,
-        }),
-        dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-            maxZoom: 19,
-        }),
-    };
-
-    // Default to satellite imagery
-    tiles.esri.addTo(map);
-
-    // Farm data from the template
-    const farms = {{ farms | tojson }};
-
-    // Known city coordinates (fallback if geocoding API fails)
-    const cityCoords = {
-        'Karachi': [24.8607, 67.0011],
-        'Lahore': [31.5497, 74.3437],
-        'Islamabad': [33.6844, 73.0479],
-        'Peshawar': [34.0283, 71.5815],
-        'Quetta': [30.1798, 67.0091],
-        'Rawalpindi': [33.6276, 73.0373],
-        'Multan': [30.2441, 71.4925],
-        'Faisalabad': [31.4187, 73.0794],
-        'London': [51.5074, -0.1278],
-        'New York': [40.7128, -74.0060],
-    };
-
-    // Plot farms on the map
-    const farmIcon = L.divIcon({
-        className: 'farm-marker',
-        html: '<i class="fas fa-map-marker-alt fa-lg text-danger drop-shadow"></i>',
-        iconSize: [24, 24],
-        iconAnchor: [12, 24],
-    });
-
-    farms.forEach(farm => {
-        const coords = cityCoords[farm.location] || [30.3769, 69.3478];
-        const marker = L.marker(coords, { icon: farmIcon })
-            .addTo(map)
-            .bindPopup(`
-                <div class="p-2">
-                    <div class="fw-bold text-primary mb-1">🚜 ${farm.name}</div>
-                    <div class="small mb-1"><i class="fas fa-user me-1"></i>${farm.owner_name}</div>
-                    <div class="small mb-1"><i class="fas fa-map-marker-alt me-1"></i>${farm.location}</div>
-                    <div class="small"><i class="fas fa-tag me-1"></i>${farm.total_area_ha} ha</div>
-                    <div class="mt-2">
-                        <a href="/fields/1" class="btn btn-xs btn-outline-primary">View Fields</a>
-                        <a href="/agri" class="btn btn-xs btn-outline-secondary ms-1">Dashboard</a>
-                    </div>
-                </div>
-            `);
-        map.setView(coords, 10);
-    });
-
-    document.getElementById('mapStatusBadge').textContent = 'Ready';
-
-    // Tile layer switcher
-    document.getElementById('tileLayerSelect').addEventListener('change', function(e) {
-        const selected = e.target.value;
-        // Remove all tile layers
-        Object.values(tiles).forEach(t => map.hasLayer(t) && map.removeLayer(t));
-        // Add selected
-        if (tiles[selected] instanceof L.layerGroup) {
-            tiles[selected].addTo(map);
-        } else {
-            tiles[selected].addTo(map);
-        }
-    });
-
-    // Fit map bounds to show all farms
-    if (farms.length > 0) {
-        const group = new L.featureGroup(
-            farms.map(f => {
-                const coords = cityCoords[f.location] || [30.3769, 69.3478];
-                return L.marker(coords);
-            })
-        );
-        if (farms.length > 0) {
-            map.fitBounds(group.getBounds().pad(0.3));
-        }
-    }
-});
+window.SWSMapConfig = {
+    mapId: 'satelliteMap',
+    geojsonUrl: '{{ url_for("agri_map_data") }}',
+    trackUser: true
+};
 </script>
+<script src="{{ url_for('static', filename='js/map.js') }}"></script>
 {% endblock %}

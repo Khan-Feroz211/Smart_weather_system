@@ -139,7 +139,8 @@
               </div>
             </div>
 
-            {% if sat_radiation and sat_radiation.get('available') %}
+            {% set rad = sat_radiation if sat_radiation else (satellite_data.openmeteo_satellite if satellite_data else None) %}
+            {% if rad and rad.get('available') %}
               <div class="row g-4 mt-3 pt-3 border-top">
                 <div class="col-12">
                   <h6 class="mb-2 text-muted small fw-bold text-uppercase">
@@ -148,28 +149,37 @@
                   <div class="row g-3 text-center">
                     <div class="col-4">
                       <div class="fw-bold text-warning">
-                        {{ sat_radiation.summary.mean_shortwave_radiation if sat_radiation.summary else '–' }}
+                        {{ (rad.summary or {}).get('mean_shortwave_radiation', '–') if rad.summary else '–' }}
                       </div>
                       <small class="text-muted">Mean SW Radiation (W/m²)</small>
                     </div>
                     <div class="col-4">
                       <div class="fw-bold text-primary">
-                        {{ sat_radiation.summary.mean_clear_sky_radiation if sat_radiation.summary else '–' }}
+                        {{ (rad.summary or {}).get('mean_clear_sky_radiation', '–') if rad.summary else '–' }}
                       </div>
                       <small class="text-muted">Clear-Sky SW Radiation (W/m²)</small>
                     </div>
                     <div class="col-4">
                       <div class="fw-bold text-info">
-                        {{ sat_radiation.summary.data_points if sat_radiation.summary else '–' }}
+                        {{ (rad.summary or {}).get('data_points', '–') if rad.summary else '–' }}
                       </div>
                       <small class="text-muted">Data Points (7-day)</small>
                     </div>
                   </div>
-                  {% if sat_radiation.get('attribution') %}
+                  {% set attribution = rad.get('attribution') %}
+                  {% if attribution %}
                     <div class="mt-2">
-                      <small class="text-muted fst-italic">{{ sat_radiation.attribution }}</small>
+                      <small class="text-muted fst-italic">{{ attribution }}</small>
                     </div>
                   {% endif %}
+                </div>
+              </div>
+            {% else %}
+              <div class="row g-4 mt-3 pt-3 border-top">
+                <div class="col-12">
+                  <div class="alert alert-warning alert-sm mb-0 py-1">
+                    <small><i class="fas fa-wifi-slash me-1"></i>Live radiation data unavailable — displaying cached GeoVis metrics. Check network connectivity.</small>
+                  </div>
                 </div>
               </div>
             {% endif %}
@@ -285,8 +295,8 @@
     <div class="col-lg-5">
       <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
-          <h5 class="mb-0"><i class="fas fa-bell me-2 text-warning"></i>Active Alerts</h5>
-          <a href="{{ url_for('agri_alerts_view') }}" class="btn btn-sm btn-outline-secondary">View All</a>
+          <h5 class="mb-0"><i class="fas fa-bell me-2 text-warning"></i><span data-i18n="active_alerts">Active Alerts</span></h5>
+          <a href="{{ url_for('agri_alerts_view') }}" class="btn btn-sm btn-outline-secondary" data-i18n="view_all">View All</a>
         </div>
         <div class="card-body" style="max-height:360px;overflow-y:auto;">
           {% if active_alerts %}
@@ -316,7 +326,7 @@
           {% else %}
             <div class="text-center text-muted py-4">
               <i class="fas fa-check-circle fa-2x text-teal mb-2"></i>
-              <p>No active alerts – all clear!</p>
+              <p data-i18n="no_active_alerts">No active alerts – all clear!</p>
             </div>
           {% endif %}
         </div>
@@ -327,7 +337,7 @@
     <div class="col-lg-5">
       <div class="card">
         <div class="card-header">
-          <h5 class="mb-0"><i class="fas fa-droplet me-2 text-teal"></i>Pending Irrigation</h5>
+          <h5 class="mb-0"><i class="fas fa-droplet me-2 text-teal"></i><span data-i18n="pending_irrigation">Pending Irrigation</span></h5>
         </div>
         <div class="card-body">
           {% if pending_irrigation %}
@@ -350,7 +360,7 @@
             </a>
             {% endfor %}
           {% else %}
-            <p class="text-muted text-center py-3">No pending irrigation tasks.</p>
+            <p class="text-muted text-center py-3" data-i18n="no_irrigation">No pending irrigation tasks.</p>
           {% endif %}
         </div>
       </div>
@@ -360,7 +370,7 @@
     <div class="col-lg-4">
       <div class="card">
         <div class="card-header">
-          <h5 class="mb-0"><i class="fas fa-bug me-2 text-danger"></i>Pest Risks</h5>
+          <h5 class="mb-0"><i class="fas fa-bug me-2 text-danger"></i><span data-i18n="pest_risks">Pest Risks</span></h5>
         </div>
         <div class="card-body">
           {% if high_risks %}
@@ -375,7 +385,7 @@
             </a>
             {% endfor %}
           {% else %}
-            <p class="text-muted text-center py-3">No high-risk pests detected.</p>
+            <p class="text-muted text-center py-3" data-i18n="no_pests">No high-risk pests detected.</p>
           {% endif %}
         </div>
       </div>

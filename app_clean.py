@@ -2083,28 +2083,28 @@ def recommendations():
 def _safe_satellite_analyze(farms):
     """Fetch satellite data from GeoVis analyzer (with graceful fallback).
 
-    Reads cached/default GeoVis data directly to avoid blocking on external
-    API calls.  Live Open-Meteo radiation is fetched separately by
-    _safe_fetch_radiation().
+    Calls ``analyze_site()`` in ONLINE mode so that live Open-Meteo shortwave
+    radiation is fetched and used to enhance the GeoVis metrics — including the
+    canopy-stress adjustment based on real radiation values.  ``analyze_site()``
+    degrades gracefully to cached / synthetic values when the API is unreachable,
+    so the dashboard card always renders instead of silently disappearing.
+
+    The live radiation summary is surfaced via ``openmeteo_satellite`` so the
+    dashboard can derive its radiation card from this single call (no duplicate
+    API requests).
     """
     try:
         from geovis_satellite import GeoVisSatelliteAnalyzer
         analyzer = GeoVisSatelliteAnalyzer()
-        # Access cached data directly — avoids the Open-Meteo API call
-        # that analyze_site() makes even in CACHE mode.
-        cached = analyzer.cached_imagery.get("default", {})
-        return {
-            "available": True,
-            "status": "CACHE",
-            "source": "geovis_satellite_cache",
-            "is_stale": True,
-            "data": {
-                "ndvi": cached.get("ndvi", 0.68),
-                "soil_moisture_index": cached.get("soil_moisture_index", 0.52),
-                "canopy_stress": cached.get("canopy_stress", "low"),
-            },
-            "disclaimer": "Satellite imagery provided by Geovis Engine. Live radiation data from Open-Meteo."
-        }
+        primary_location = farms[0]['location'] if farms and farms[0]['location'] else 'Lahore'
+        site = {"location": primary_location}
+        # LIVE: analyze_site attempts the Open-Meteo API and augments the cached
+        # GeoVis metrics with real radiation data.
+        result = analyzer.analyze_site(site, connectivity_state="ONLINE")
+        if not result or not result.get("available"):
+            # Fall back to CACHE mode, then to cached defaults
+            result = analyzer.analyze_site(site, connectivity_state="CACHE")
+        return result
     except Exception as e:
         logger.warning("GeoVis satellite analysis failed: %s", e)
         return None
@@ -2197,25 +2197,41 @@ def agri_dashboard():
         ''').fetchall()
         recent_activities = [dict(row) for row in recent_activities]
 
-        # Satellite imagery data (GeoVis synthetic + Open-Meteo live radiation)
-        # Run in a daemon thread with a timeout so the dashboard loads quickly
-        # even when the Open-Meteo API is unreachable (network restricted).
+        # Satellite imagery data (GeoVis live + Open-Meteo radiation).
+        # A single analyze_site() call fetches live radiation internally and
+        # augments the GeoVis metrics, so we derive the radiation card from
+        # that result — no duplicate API request.  Daemon thread + timeout so
+        # the dashboard still loads quickly when the API is unreachable.
         satellite_data = None
         sat_radiation = None
         _sat_result = {}
         _sat_thread = threading.Thread(
             target=lambda: _sat_result.update({
                 'geo': _safe_satellite_analyze(farms),
-                'rad': _safe_fetch_radiation(farms),
             }),
             daemon=True,
         )
         _sat_thread.start()
-        _sat_thread.join(timeout=8.0)
+        _sat_thread.join(timeout=12.0)
         if _sat_thread.is_alive():
             logger.warning("Satellite data fetch timed out – using cached/defaults")
         satellite_data = _sat_result.get('geo')
-        sat_radiation = _sat_result.get('rad')
+
+        # Derive the radiation card from the live augmentation when available,
+        # so a single fetch powers both the GeoVis card and the radiation card.
+        if satellite_data:
+            oms = satellite_data.get("openmeteo_satellite") or {}
+            if oms.get("available"):
+                sat_radiation = {
+                    "available": True,
+                    "source": oms.get("source", "openmeteo_satellite_api"),
+                    "location": satellite_data.get("location"),
+                    "latitude": oms.get("latitude"),
+                    "longitude": oms.get("longitude"),
+                    "summary": oms.get("radiation_summary", {}),
+                    "attribution": oms.get("attribution", "Data © Open-Meteo (CC BY 4.0)"),
+                    "timestamp": satellite_data.get("timestamp"),
+                }
 
 
         # Convert SQLite rows to plain dicts so Jinja2 `|tojson` works
@@ -2262,8 +2278,6 @@ def agri_dashboard():
     except Exception as e:
         flash(f'Agriculture dashboard error: {e}', 'error')
         satellite_data = None
-        from openmeteo_integration import fetch_satellite_data
-        primary_location = 'Lahore'
         sat_radiation = None
         return render_template('agri_dashboard.html',
                                farms=[], total_farms=0, total_fields=0,
@@ -3686,14 +3700,81 @@ def predict_hazards():
 
     try:
         alert = weather_ai.predict_with_degradation(location, lat, lon)
+        connectivity_state = request.args.get("connectivity_state", "").strip().upper()
+        degradation_mode = str(alert.get("degradation_info", {}).get("mode", "")).upper()
+        is_offline = connectivity_state == "OFFLINE" or degradation_mode == "OFFLINE"
+        sms_result = None
+        if is_offline and alert.get("overall_risk_level") in ("orange", "red"):
+            owner_conn = None
+            try:
+                owner_conn = get_db_connection()
+                owner = owner_conn.execute(
+                    "SELECT phone_number FROM users WHERE username = 'farm_owner' "
+                    "AND notifications_enabled = 1"
+                ).fetchone()
+                if owner and owner["phone_number"]:
+                    urdu_message = weather_ai.communication_system.generate_urdu_sms_alert(alert)
+                    sms_result = send_farm_notification(owner["phone_number"], urdu_message, channel="sms")
+                    sms_result["message_length"] = len(urdu_message)
+            except Exception as exc:
+                logger.warning("Offline Urdu SMS fallback skipped: %s", exc)
+            finally:
+                if owner_conn:
+                    owner_conn.close()
         return jsonify({
             'success': True,
             'location': location,
             'alert': alert,
+            'offline_sms': sms_result,
         })
     except Exception as e:
         logger.error(f"Hazard prediction error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/weather/grid')
+def weather_grid():
+    """Return a small Open-Meteo wind grid as east/north u/v components."""
+    latitude = request.args.get("latitude", 30.3769, type=float)
+    longitude = request.args.get("longitude", 69.3478, type=float)
+    spacing = request.args.get("spacing", 0.25, type=float)
+    points = [
+        (round(latitude + (row - 2) * spacing, 4), round(longitude + (col - 2) * spacing, 4))
+        for row in range(5) for col in range(5)
+    ]
+    try:
+        response = requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": ",".join(str(point[0]) for point in points),
+                "longitude": ",".join(str(point[1]) for point in points),
+                "hourly": "wind_speed_10m,wind_direction_10m",
+                "forecast_days": 1,
+                "timezone": "UTC",
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if isinstance(payload, dict):
+            payload = [payload]
+        grid = []
+        for point, item in zip(points, payload):
+            hourly = item.get("hourly", {})
+            speed = (hourly.get("wind_speed_10m") or [0])[0] or 0
+            direction = (hourly.get("wind_direction_10m") or [0])[0] or 0
+            radians = np.deg2rad(float(direction))
+            speed_ms = float(speed) / 3.6
+            grid.append({
+                "latitude": point[0],
+                "longitude": point[1],
+                "u": round(-speed_ms * float(np.sin(radians)), 3),
+                "v": round(-speed_ms * float(np.cos(radians)), 3),
+            })
+        return jsonify({"source": "open-meteo", "points": grid, "updated_at": datetime.utcnow().isoformat() + "Z"})
+    except Exception as exc:
+        logger.warning("Wind grid fetch failed: %s", exc)
+        return jsonify({"source": "open-meteo", "points": [], "error": "Wind data unavailable"}), 503
 
 
 @app.route('/api/hazards/alerts')
