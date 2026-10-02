@@ -102,6 +102,8 @@ Smart_weather_system/
 │   ├── profile.html           # User profile page
 │   ├── agri_alerts.html       # Hazard alerts display
 │   ├── disease_detection.html # Plant disease scanner (image upload)
+│   ├── weather_display.html   # Weather cards with AI predictions
+│   ├── full_weather_map.html  # Interactive Pakistan weather map with station markers
 │   └── ... (other templates)
 │
 ├── static/css/               # CSS assets
@@ -189,6 +191,7 @@ df = load_agriculture_dataset(crop_type="Wheat", sample=1000)
 | Agriculture | `/agri` | AgriAdvisor v6 symptom checker (offline-safe, 100+ crops) |
 | Disease Scanner | `/agri/disease-detection` | Image-based plant disease detection |
 | Weather | `/weather` | Current weather data and forecasts |
+| Weather Map | `/weather/map` | Interactive Pakistan map with 8 city weather stations |
 | Agri Alerts | `/alerts` | Active weather and hazard alerts |
 | Recommendations | `/recommendations` | AI-powered farming recommendations |
 | Create User | `/add_user` | Admin-only: create new user accounts |
@@ -1673,6 +1676,21 @@ apscheduler==3.10.4       # Task scheduling
 - Detailed charts (temperature trends, humidity, pressure)
 - Historical data graphs
 - Search for new locations
+
+---
+
+#### `templates/full_weather_map.html`
+**Purpose**: Interactive Pakistan weather map with city markers and weather details.
+
+**Features**:
+- Leaflet.js map centered on Pakistan with 8 city weather stations (Lahore, Islamabad, Peshawar, Multan, Karachi, Quetta, Faisalabad, Rawalpindi)
+- City markers with live weather popups (temperature, condition, humidity, wind)
+- Weather details sidebar showing selected city's full conditions (temp, condition icon, humidity, wind, pressure)
+- Search bar to jump to any supported city
+- Zoom in/out, reset view, and fullscreen toggle controls
+- WebSocket sync — selecting a city on the map sends a real-time weather request
+
+**Route**: `GET /weather/map`
 
 ---
 

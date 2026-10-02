@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+{% block title %}Full Weather Map — Smart AgriWeather{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-0">
+  <!-- Header Bar -->
+  <div class="card-futuristic mb-3" style="border-radius: 0; margin-bottom: 0;">
+    <div class="d-flex align-items-center justify-content-between px-3 py-2">
+      <h5 class="mb-0">
+        <i class="fas fa-map me-2 text-primary"></i>
+        Full Weather Map
+      </h5>
+      <div class="d-flex align-items-center gap-2">
+        <!-- Search -->
+        <div class="input-group input-group-sm" style="width: 200px;">
+          <input type="text" class="form-control form-control-sm" id="citySearch" placeholder="Search city...">
+          <button class="btn btn-sm btn-outline-secondary" onclick="searchCity()">
+            <i class="fas fa-search"></i>
+          </button>
+        </div>
+        <!-- Zoom Controls -->
+        <button class="btn btn-sm btn-outline-secondary" onclick="zoomIn()">
+          <i class="fas fa-plus"></i>
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="zoomOut()">
+          <i class="fas fa-minus"></i>
+        </button>
+        <!-- Reset -->
+        <button class="btn btn-sm btn-outline-secondary" onclick="resetMap()">
+          <i class="fas fa-sync-alt"></i>
+        </button>
+        <!-- Fullscreen -->
+        <button class="btn btn-sm btn-outline-secondary" onclick="toggleFullscreen()">
+          <i class="fas fa-expand"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-0">
+    <!-- Map Column (main) -->
+    <div class="col-lg-8">
+      <div id="fullWeatherMap" style="height: 600px; width: 100%;"></div>
+    </div>
+    <!-- Weather Details Sidebar -->
+    <div class="col-lg-4">
+      <div class="card-futuristic h-100 mb-0" style="border-radius: 0;">
+        <div class="card-body">
+          <!-- Selected City Weather -->
+          <div id="selectedCityWeather">
+            <h4 class="mb-0" id="cityName">
+              <i class="fas fa-map-marker-alt me-2 text-danger"></i>Lahore
+            </h4>
+            <div class="text-center my-4">
+              <div class="display-3 fw-bold mb-2" id="cityTemp">
+                <span class="temperature">29°C</span>
+              </div>
+              <div class="mb-3">
+                <i class="fas fa-sun fa-2x text-warning me-2"></i>
+                <span class="fs-5 text-muted" id="cityCondition">Partly Cloudy</span>
+              </div>
+              <div class="row text-center g-3 mt-3">
+                <div class="col-4">
+                  <div class="text-muted small">Humidity</div>
+                  <div class="fw-bold fs-5" id="cityHumidity">62%</div>
+                </div>
+                <div class="col-4">
+                  <div class="text-muted small">Wind</div>
+                  <div class="fw-bold fs-5" id="cityWind">12 km/h</div>
+                </div>
+                <div class="col-4">
+                  <div class="text-muted small">Pressure</div>
+                  <div class="fw-bold fs-5" id="cityPressure">1012 hPa</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- City List -->
+          <hr class="my-4">
+          <h6 class="text-uppercase text-muted small mb-3">
+            <i class="fas fa-list me-2"></i>Weather Stations
+          </h6>
+          <div class="list-group list-group-flush" id="cityList">
+            <a href="#" class="list-group-item list-group-item-action" onclick="selectCity('Lahore')">
+              <span class="d-flex justify-content-between align-items-center">
+                <span>● Lahore</span>
+                <span class="text-muted small">29°C ☀️</span>
+              </span>
+            </a>
+            <a href="#" class="list-group-item list-group-item-action" onclick="selectCity('Islamabad')">
+              <span class="d-flex justify-content-between align-items-center">
+                <span>● Islamabad</span>
+                <span class="text-muted small">24°C ☁️</span>
+              </span>
+            </a>
+            <a href="#" class="list-group-item list-group-item-action" onclick="selectCity('Peshawar')">
+              <span class="d-flex justify-content-between align-items-center">
+                <span>● Peshawar</span>
+                <span class="text-muted small">27°C ☀️</span>
+              </span>
+            </a>
+            <a href="#" class="list-group-item list-group-item-action" onclick="selectCity('Multan')">
+              <span class="d-flex justify-content-between align-items-center">
+                <span>● Multan</span>
+                <span class="text-muted small">31°C ☀️</span>
+              </span>
+            </a>
+            <a href="#" class="list-group-item list-group-item-action" onclick="selectCity('Karachi')">
+              <span class="d-flex justify-content-between align-items-center">
+                <span>● Karachi</span>
+                <span class="text-muted small">33°C ☀️</span>
+              </span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Leaflet CSS + JS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxB2LRU1mdnx4PBW+0XhE8Ff8rF0b4J6Q5z7y4z0c=" crossorigin=""/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20oQhZ+5k7Q7Z5m7L7Z5m7L7n2L5m5Q5z5Q5z5Q5z=" crossorigin=""></script>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// City weather data (mock — replace with API call for live data)
+const cityWeather = {
+    'Lahore':      { temp: 29, condition: 'Partly Cloudy', humidity: 62, wind: 12, pressure: 1012, icon: 'sun' },
+    'Islamabad':   { temp: 24, condition: 'Cloudy',        humidity: 55, wind: 8,  pressure: 1015, icon: 'cloud' },
+    'Peshawar':    { temp: 27, condition: 'Sunny',         humidity: 45, wind: 14, pressure: 1010, icon: 'sun' },
+    'Multan':      { temp: 31, condition: 'Sunny',         humidity: 48, wind: 10, pressure: 1009, icon: 'sun' },
+    'Karachi':     { temp: 33, condition: 'Sunny',         humidity: 70, wind: 18, pressure: 1008, icon: 'sun' },
+    'Quetta':      { temp: 22, condition: 'Clear',         humidity: 35, wind: 6,  pressure: 1018, icon: 'moon' },
+    'Faisalabad':  { temp: 28, condition: 'Partly Cloudy', humidity: 58, wind: 9,  pressure: 1013, icon: 'sun' },
+    'Rawalpindi':  { temp: 23, condition: 'Cloudy',        humidity: 52, wind: 7,  pressure: 1014, icon: 'cloud' },
+};
+
+const cityCoords = {
+    'Peshawar':    [34.0283, 71.5815],
+    'Islamabad':   [33.6844, 73.0479],
+    'Lahore':      [31.5497, 74.3437],
+    'Multan':      [30.2441, 71.4925],
+    'Karachi':     [24.8607, 67.0011],
+    'Quetta':      [30.1798, 67.0091],
+    'Faisalabad':  [31.4187, 73.0794],
+    'Rawalpindi':  [33.6276, 73.0373],
+};
+
+let map;
+let markers = {};
+let selectedCity = 'Lahore';
+let isFullscreen = false;
+
+function initMap() {
+    map = L.map('fullWeatherMap').setView([30.3769, 69.3478], 6);
+
+    // Pakistan-focused tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 12,
+    }).addTo(map);
+
+    // Add weather station markers
+    for (const [city, coords] of Object.entries(cityCoords)) {
+        const weather = cityWeather[city] || { temp: '--', condition: 'N/A', humidity: '--', wind: '--', pressure: '--', icon: 'cloud' };
+        const iconName = weather.icon === 'sun' ? 'sun' : weather.icon === 'cloud' ? 'cloud' : weather.icon === 'moon' ? 'moon' : 'cloud-sun';
+
+        const markerIcon = L.divIcon({
+            className: 'weather-marker',
+            html: `<div class="d-flex align-items-center gap-1 bg-white rounded-pill px-2 py-1 shadow-sm" style="font-weight:600;">
+                     <i class="fas fa-${weather.icon === 'sun' ? 'sun' : 'cloud'} text-warning"></i>
+                     <span class="text-dark small">${city}</span>
+                   </div>`,
+            iconSize: [90, 28],
+            iconAnchor: [45, 14],
+        });
+
+        const marker = L.marker(coords, { icon: markerIcon }).addTo(map);
+
+        marker.bindPopup(`
+            <div class="p-1">
+                <div class="fw-bold mb-1">${city}</div>
+                <div class="d-flex align-items-center gap-2">
+                    <i class="fas fa-${iconName} fa-lg"></i>
+                    <span>${weather.temp}°C</span>
+                </div>
+                <div class="small text-muted">${weather.condition}</div>
+                <div class="small">💧 ${weather.humidity}%  💨 ${weather.wind} km/h</div>
+            </div>
+        `).on('click', function() {
+            selectCity(city);
+        });
+
+        markers[city] = marker;
+    }
+}
+
+function selectCity(city) {
+    if (!cityWeather[city] || !cityCoords[city]) return;
+
+    selectedCity = city;
+
+    // Update sidebar
+    const w = cityWeather[city];
+    document.getElementById('cityName').innerHTML = '<i class="fas fa-map-marker-alt me-2 text-danger"></i>' + city;
+    document.querySelector('#cityTemp .temperature').textContent = w.temp + '°C';
+    document.getElementById('cityCondition').textContent = w.condition;
+    document.getElementById('cityHumidity').textContent = w.humidity + '%';
+    document.getElementById('cityWind').textContent = w.wind + ' km/h';
+    document.getElementById('cityPressure').textContent = w.pressure + ' hPa';
+
+    // Update icon
+    const iconEl = document.querySelector('#cityTemp .fa-2x');
+    if (iconEl) {
+        const iconClass = w.icon === 'sun' ? 'fa-sun' : w.icon === 'cloud' ? 'fa-cloud' : 'fa-moon';
+        iconEl.className = 'fas ' + iconClass + ' fa-2x text-warning me-2';
+    }
+
+    // Fly to city on map
+    if (map && markers[city]) {
+        map.setView(cityCoords[city], 8);
+        markers[city].openPopup();
+    }
+
+    // Dispatch weather update for real-time dashboard sync
+    if (window.weatherSystem) {
+        window.weatherSystem.requestWeather(city);
+    }
+}
+
+function searchCity() {
+    const input = document.getElementById('citySearch');
+    const city = input.value.trim();
+    if (city && cityWeather[city]) {
+        selectCity(city);
+        input.value = '';
+    } else if (city) {
+        alert('City not found. Available: ' + Object.keys(cityWeather).join(', '));
+        input.value = '';
+    }
+}
+
+function zoomIn() { if (map) map.zoomIn(); }
+function zoomOut() { if (map) map.zoomOut(); }
+
+function resetMap() {
+    if (!map) return;
+    map.setView([30.3769, 69.3478], 6);
+    Object.values(markers).forEach(m => m.closePopup());
+}
+
+function toggleFullscreen() {
+    const mapContainer = document.querySelector('.row.g-0');
+    if (!isFullscreen) {
+        mapContainer.classList.add('fullscreen-map');
+        isFullscreen = true;
+    } else {
+        mapContainer.classList.remove('fullscreen-map');
+        isFullscreen = false;
+    }
+    setTimeout(() => { if (map) map.invalidateSize(); }, 100);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    initMap();
+
+    // Enter key on search
+    document.getElementById('citySearch').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') searchCity();
+    });
+
+    // Load weather for default city
+    selectCity('Lahore');
+});
+</script>
+
+<style>
+.fullscreen-map {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    z-index: 9999;
+    background: var(--color-surface);
+    padding: 0;
+    margin: 0;
+}
+.weather-marker {
+    background: transparent !important;
+    box-shadow: none !important;
+}
+</style>
+{% endblock %}

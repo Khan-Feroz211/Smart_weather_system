@@ -43,8 +43,8 @@ def make_app():
     app.secret_key = "t" * 48
     # Register every endpoint referenced by base.html + 2FA templates
     for name in ("dashboard", "agri_dashboard", "farms_list", "agri_alerts_view",
-                 "disease_detection", "weather_display", "user_management",
-                 "user_access", "add_user"):
+                 "disease_detection", "weather_display", "full_weather_map",
+                 "user_management", "user_access", "add_user"):
         app.add_url_rule(f"/{name}", name, lambda n=name: f"ok:{n}")
     auth.init_app(app)
     app.config["SESSION_COOKIE_SECURE"] = False

@@ -2071,6 +2071,11 @@ def add_alert(user_id):
 def weather_display():
     return render_template('weather_display.html')
 
+@app.route('/weather/map')
+def full_weather_map():
+    """Full-screen interactive weather map with city markers and details."""
+    return render_template('full_weather_map.html', now=datetime.now())
+
 @app.route('/alerts')
 def alerts():
     conn = get_db_connection()
