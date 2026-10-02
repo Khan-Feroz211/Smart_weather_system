@@ -39,7 +39,8 @@
 
   <div class="row g-0">
     <!-- Map Column (main) -->
-    <div class="col-lg-8">
+    <div class="col-lg-8" style="position: relative;">
+      <div id="mapTitleOverlay" class="map-title-overlay">PAKISTAN MAP</div>
       <div id="fullWeatherMap" style="height: 600px; width: 100%;"></div>
     </div>
     <!-- Weather Details Sidebar -->
@@ -158,6 +159,7 @@ let selectedCity = 'Lahore';
 let isFullscreen = false;
 
 function initMap() {
+    try {
     map = L.map('fullWeatherMap').setView([30.3769, 69.3478], 6);
 
     // Pakistan-focused tiles
@@ -165,15 +167,6 @@ function initMap() {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         maxZoom: 12,
     }).addTo(map);
-
-    // Map title overlay
-    var mapTitleControl = L.control({position: 'topcenter'});
-    mapTitleControl.onAdd = function() {
-        var div = L.DomUtil.create('div', 'map-title-overlay');
-        div.innerHTML = '<span>PAKISTAN MAP</span>';
-        return div;
-    };
-    mapTitleControl.addTo(map);
 
     // Add weather station markers
     for (const [city, coords] of Object.entries(cityCoords)) {
@@ -207,6 +200,11 @@ function initMap() {
         });
 
         markers[city] = marker;
+    }
+    } catch (e) {
+        console.error('Map init error:', e);
+        document.getElementById('fullWeatherMap').innerHTML =
+            '<div class="text-center py-5 text-muted"><i class="fas fa-exclamation-triangle fa-2x mb-2"></i><p>Map failed to load: ' + e.message + '</p></div>';
     }
 }
 
@@ -305,18 +303,19 @@ document.addEventListener('DOMContentLoaded', function() {
 }
 .map-title-overlay {
     position: absolute;
-    top: 50px;
+    top: 12px;
     left: 50%;
     transform: translateX(-50%);
     background: rgba(255, 255, 255, 0.9);
     backdrop-filter: blur(4px);
     border-radius: 20px;
-    padding: 8px 20px;
+    padding: 8px 24px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     font-weight: 700;
     font-size: 1.1rem;
     color: var(--color-text);
     z-index: 700;
+    pointer-events: none;
 }
 </style>
 {% endblock %}
