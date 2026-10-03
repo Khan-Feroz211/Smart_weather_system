@@ -808,7 +808,7 @@ def build_decision(cleaned_record, prediction, quality_assessment):
         return {
             'alert_required': prediction.get('alert_required', False),
             'severity': prediction.get('overall_risk_level', 'green'),
-            'reason': ', '.join(prediction.get('active_hazards', [])) if prediction.get('active_hazards') else 'normal_conditions',
+            'reason': ', '.join(h.get('hazard', str(h)) if isinstance(h, dict) else str(h) for h in prediction.get('active_hazards', [])) if prediction.get('active_hazards') else 'normal_conditions',
             'recommended_action': prediction.get('message', 'Weather conditions normal. Continue monitoring.'),
             'confidence': prediction.get('confidence', quality_assessment['confidence']),
             'hazard_probabilities': prediction.get('hazard_probabilities', {}),
