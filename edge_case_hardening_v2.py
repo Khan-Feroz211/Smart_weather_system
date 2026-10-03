@@ -504,6 +504,19 @@ class ConfidencePenaltySystem:
 
 
 # ============================================================================
+# API Key Detection
+# ============================================================================
+
+def _is_demo_api_key(api_key: Optional[str]) -> bool:
+    """Return True when the API key is a placeholder/demo value."""
+    if not api_key:
+        return True
+    demo_markers = ("demo_key", "your_", "your-", "<your", "placeholder")
+    lowered = api_key.strip().lower()
+    return any(m in lowered for m in demo_markers)
+
+
+# ============================================================================
 # Graceful Degradation Manager
 # ============================================================================
 
@@ -556,8 +569,8 @@ class GracefulDegradationManager:
         is_cache_mode = False
         is_degraded = False
 
-        # Step 1: Try live API
-        if self.circuit_breaker.allow_request():
+        # Step 1: Try live API (skip if API key is a placeholder/demo key)
+        if self.circuit_breaker.allow_request() and not _is_demo_api_key(self.api_key):
             try:
                 import requests
                 params = {"q": location, "appid": self.api_key, "units": "metric"}

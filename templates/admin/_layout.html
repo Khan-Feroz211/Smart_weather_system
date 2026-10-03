@@ -49,11 +49,6 @@
       {{ link('crop_health', url_for('admin.crop_health'), 'fa-heart-pulse', 'Crop Health') }}
       {{ link('yield', url_for('admin.yield_forecasts'), 'fa-chart-column', 'Yield Forecasts') }}
     {% endcall %}
-    {% call group('sensors', 'fa-satellite-dish', 'Sensors', ['sensors']) %}
-      {{ link('sensors', url_for('admin.sensors'), 'fa-signal', 'Sensor Status') }}
-      {{ link('sensors-q', url_for('admin.sensors', tab='quality'), 'fa-star-half-stroke', 'Quality Metrics') }}
-      {{ link('sensors-l', url_for('admin.sensors', tab='logs'), 'fa-list-check', 'Pipeline Logs') }}
-    {% endcall %}
     {% call group('ai', 'fa-robot', 'AI Monitoring', ['ai']) %}
       {{ link('ai', url_for('admin.ai'), 'fa-bullseye', 'Prediction Quality') }}
     {% endcall %}

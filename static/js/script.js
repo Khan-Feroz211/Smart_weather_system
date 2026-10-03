@@ -289,17 +289,19 @@ class WeatherSystem {
             if (element.dataset.originalTemp === undefined) {
                 element.dataset.originalTemp = parseFloat(element.textContent);
             }
-            
+
             const originalTemp = parseFloat(element.dataset.originalTemp);
+            if (isNaN(originalTemp)) return; // Skip elements without valid temperature data
+
             const variation = (Math.random() - 0.5) * 2; // -1 to +1
             const newTemp = (originalTemp + variation).toFixed(1);
-            
+
             // Add visual feedback
             element.classList.add('temp-updating');
             setTimeout(() => {
                 element.textContent = newTemp + '°C';
                 element.classList.remove('temp-updating');
-                
+
                 // Update temperature color class
                 this.updateTemperatureColor(element, newTemp);
             }, 300);
@@ -494,10 +496,10 @@ class WeatherSystem {
     simulateAITraining() {
         this.showNotification('🤖 AI model training completed!', 'success');
         
-        const aiStatus = document.querySelector('.ai-status');
-        if (aiStatus) {
-            aiStatus.textContent = 'Trained';
-            aiStatus.className = 'ai-status trained';
+        // ai-status-badge element was removed from dashboard header
+        const aiOval = document.getElementById('ai-status-badge');
+        if (aiOval) {
+            aiOval.className = 'ai-oval trained';
         }
     }
 }

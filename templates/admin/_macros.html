@@ -26,7 +26,6 @@
   {%- if c.kind == 'sev' %}{{ sev_pill(v) }}
   {%- elif c.kind == 'presence' %}{{ presence_pill(v) }}
   {%- elif c.kind == 'active' %}{% if v %}<span class="pill green">Active</span>{% else %}<span class="pill gray">Inactive</span>{% endif %}
-  {%- elif c.kind == 'sensor_status' %}{% if row.is_live %}<span class="pill green">🟢 Live</span>{% elif v == 'active' %}<span class="pill yellow">🟡 Stale</span>{% else %}<span class="pill red">{{ v }}</span>{% endif %}
   {%- elif c.kind == 'status' %}{% if v in (None, '', '—') %}—{% else %}<span class="pill {{ 'green' if v in ['valid','evaluated','completed','running'] else 'yellow' if v in ['pending','suspicious'] else 'gray' }}">{{ v }}</span>{% endif %}
   {%- elif v is none or v == '' %}<span class="text-muted">—</span>
   {%- elif c.kind == 'num' %}{{ '{:,}'.format(v) }}

@@ -13,6 +13,9 @@ Environment variables (set in .env):
     TWILIO_SMS_FROM       – Twilio phone number for SMS (e.g. +14155238886)
     TWILIO_WHATSAPP_FROM  – Twilio WhatsApp sender (e.g. whatsapp:+14155238886)
     NOTIFICATION_ENABLED  – Set to "false" to disable all outgoing messages
+    LOCAL_SMS_GATEWAY_URL – Optional local HTTP gateway for SMS fallback
+                             (e.g. a GSM-modem endpoint).  When Twilio is not
+                             configured and this is unset, messages are logged.
 """
 
 from __future__ import annotations
@@ -23,6 +26,8 @@ import json
 from datetime import datetime
 from typing import Dict, Any, Optional
 
+import requests
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -32,6 +37,7 @@ TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
 TWILIO_SMS_FROM = os.environ.get("TWILIO_SMS_FROM", "")
 TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "")
+LOCAL_SMS_GATEWAY_URL = os.environ.get("LOCAL_SMS_GATEWAY_URL", "").strip()
 NOTIFICATION_ENABLED = os.environ.get("NOTIFICATION_ENABLED", "true").strip().lower() in (
     "1", "true", "yes", "on",
 )
@@ -190,6 +196,103 @@ def notify_farm_alert(
         alert_type, field=field_name, farm=farm_name, **extra
     )
     return send_farm_notification(user_phone, message, channel=channel)
+
+
+# ---------------------------------------------------------------------------
+# Local SMS gateway fallback
+# ---------------------------------------------------------------------------
+def send_local_sms(to_phone: str, message: str) -> Dict[str, Any]:
+    """Send an SMS via a *local* gateway (e.g. a GSM-modem HTTP endpoint).
+
+    If ``LOCAL_SMS_GATEWAY_URL`` is set, a POST request is made to that URL
+    with ``{"to": ..., "message": ...}``.  When no local gateway is configured
+    the message is logged so the rest of the application keeps working.
+    """
+    if not NOTIFICATION_ENABLED:
+        return {"success": False, "error": "Notifications disabled via NOTIFICATION_ENABLED=false"}
+
+    if not _is_valid_phone(to_phone):
+        return {"success": False, "error": f"Invalid phone number: {to_phone}"}
+
+    if LOCAL_SMS_GATEWAY_URL:
+        try:
+            resp = requests.post(
+                LOCAL_SMS_GATEWAY_URL,
+                json={"to": to_phone, "message": message},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                logger.info("[LOCAL SMS] Sent to %s via %s", to_phone, LOCAL_SMS_GATEWAY_URL)
+                return {"success": True, "message_sid": "local_sms", "error": None,
+                        "channel": "local_sms"}
+            logger.error("Local SMS gateway returned %s: %s", resp.status_code, resp.text[:200])
+            return {"success": False, "error": f"Local SMS gateway HTTP {resp.status_code}",
+                    "channel": "local_sms"}
+        except Exception as exc:
+            logger.error("Local SMS gateway error: %s", exc)
+            return {"success": False, "error": str(exc), "channel": "local_sms"}
+
+    # Graceful fallback: log the message
+    logger.info("[LOCAL SMS FALLBACK] To: %s | %s", to_phone, message)
+    return {
+        "success": True,
+        "message_sid": "local_sms_log",
+        "error": None,
+        "channel": "local_sms",
+        "note": "No local SMS gateway configured – message logged only",
+    }
+
+
+def send_notification_auto(user_phone: str, message: str) -> Dict[str, Any]:
+    """Send a notification, trying **WhatsApp first** then falling back to SMS.
+
+    This implements the "send on WhatsApp if the number is on WhatsApp,
+    otherwise on local SMS" requirement:
+
+    1. When Twilio is configured, a WhatsApp attempt is made.  If the
+       number cannot receive WhatsApp (Twilio returns an error) we fall
+       back to Twilio SMS.
+    2. When Twilio is **not** configured we go straight to the local SMS
+       gateway (or log-only fallback).
+
+    Returns a dict with ``success``, ``channel`` ("whatsapp" | "sms"),
+    ``message_sid`` and ``error``.
+    """
+    if not NOTIFICATION_ENABLED:
+        return {"success": False, "error": "Notifications disabled via NOTIFICATION_ENABLED=false"}
+
+    if not _is_valid_phone(user_phone):
+        return {"success": False, "error": f"Invalid phone number: {user_phone}"}
+
+    client = _get_twilio_client()
+
+    # ---- Twilio is available → try WhatsApp, then SMS ----
+    if client is not None:
+        wa_result = send_whatsapp(user_phone, message)
+        if wa_result.get("success") and wa_result.get("message_sid") not in ("whatsapp_log_only", None):
+            return {
+                "success": True,
+                "channel": "whatsapp",
+                "message_sid": wa_result.get("message_sid"),
+                "error": None,
+            }
+        # WhatsApp failed (number not on WhatsApp or other error) → fall back to SMS
+        sms_result = send_sms(user_phone, message)
+        return {
+            "success": sms_result.get("success", False),
+            "channel": "sms",
+            "message_sid": sms_result.get("message_sid"),
+            "error": sms_result.get("error"),
+        }
+
+    # ---- Twilio not configured → local SMS gateway or log ----
+    sms_result = send_local_sms(user_phone, message)
+    return {
+        "success": sms_result.get("success", False),
+        "channel": "local_sms",
+        "message_sid": sms_result.get("message_sid"),
+        "error": sms_result.get("error"),
+    }
 
 
 def get_user_notification_settings(conn, user_id: int) -> Dict[str, Any]:

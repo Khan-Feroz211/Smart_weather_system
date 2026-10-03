@@ -7,6 +7,9 @@ apscheduler==3.10.4
 paho-mqtt==2.1.0
 structlog==24.1.0
 twilio==9.11.1
+# Two-factor authentication (TOTP) + QR code generation for authenticator apps
+pyotp==2.10.0
+qrcode==8.2
 scikit-learn==1.5.0
 pandas==2.2.2
 numpy==1.26.4

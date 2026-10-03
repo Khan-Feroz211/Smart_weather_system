@@ -165,6 +165,13 @@ def login():
             flash(generic, "error")
             return render_template("admin/login.html", next=nxt, email=email), 401
         auth.login_limiter.reset(key)
+
+        # Two-factor authentication check for admin
+        if profile.get("totp_secret"):
+            auth._set_pending_2fa(profile, nxt, step="verify")
+            flash("Your account has two-factor authentication enabled. Please verify your code.", "info")
+            return redirect(url_for("auth.verify_2fa"))
+
         auth.start_session(profile, admin=True)
         try:
             with db.connect() as conn:
@@ -207,8 +214,7 @@ def dashboard(conn):
     return render_template(
         "admin/dashboard.html", active="dashboard", title="Dashboard", stats=stats,
         presence=ad.presence_summary(conn), activity=ad.recent_activity(conn, 10),
-        active_minutes=ad.ACTIVE_MINUTES, recent_minutes=ad.RECENT_MINUTES,
-        sensor_minutes=ad.SENSOR_ACTIVE_MINUTES)
+        active_minutes=ad.ACTIVE_MINUTES, recent_minutes=ad.RECENT_MINUTES)
 
 
 # --------------------------------------------------------------------------
@@ -402,49 +408,6 @@ def yield_forecasts(conn):
 
 
 # --------------------------------------------------------------------------
-# Sensors
-# --------------------------------------------------------------------------
-@admin_bp.route("/admin/sensors")
-@auth.admin_required
-@db_view
-def sensors(conn):
-    tab = request.args.get("tab", "status")
-    s = ad.sensor_stats(conn)
-    stats = [stat("Registered sensors", s["total"], "fa-microchip"),
-             stat("Active sensors", s["active"], "fa-signal", "success", hint=f"reading within {ad.SENSOR_ACTIVE_MINUTES} min"),
-             stat("Stale sensors", s["stale"], "fa-hourglass-half", "warning"),
-             stat("Inactive / faulty", s["inactive"], "fa-plug-circle-xmark", "danger"),
-             stat("Avg quality score", s["avg_quality"], "fa-star-half-stroke", "primary", "f2"),
-             stat("Readings (24 h)", s["readings_24h"], "fa-database", "info"),
-             stat("Validation failure rate", s["failure_rate"], "fa-circle-exclamation", "danger", "pct1"),
-             stat("Pipeline log entries", s["pipeline_logs"], "fa-list-check", "info")]
-    tabs = [{"key": k, "label": lbl, "url": url_for("admin.sensors", tab=k), "active": k == tab}
-            for k, lbl in (("status", "Sensor status"), ("quality", "Quality metrics"), ("logs", "Pipeline logs"))]
-    if tab == "quality":
-        data = ad.sensor_quality_page(conn, _q(), _int("page", 1))
-        columns = [col("sensor_id", "Sensor"), col("total_records", "Records", "num"),
-                   col("validation_failures", "Validation failures", "num"), col("duplicate_records", "Duplicates", "num"),
-                   col("outlier_corrections", "Outliers corrected", "num"), col("failure_rate", "Failure rate", "pct1"),
-                   col("updated_at", "Updated", "dt")]
-    elif tab == "logs":
-        data = ad.sensor_logs_page(conn, _q(), _int("page", 1))
-        columns = [col("created_at", "Logged (UTC)", "dt"), col("sensor_id", "Sensor"), col("source", "Source"),
-                   col("location", "Location"), col("quality_label", "Quality", "status"),
-                   col("validation_score", "Score", "f2"), col("severity", "Decision", "sev"),
-                   col("quality_flags", "Flags")]
-    else:
-        tab = "status"
-        data = ad.sensors_status_page(conn, _q(), _int("page", 1))
-        columns = [col("sensor_id", "Sensor ID"), col("sensor_type", "Type"), col("field_id", "Field"),
-                   col("last_reading_rel", "Last reading"), col("status", "Status", "sensor_status"),
-                   col("uptime_percentage", "Uptime %", "f1"), col("quality_score_avg", "Quality", "f2"),
-                   col("calibration_date", "Calibration")]
-    return render_list("Sensor Monitoring", "sensors", columns, data, stats=stats, tabs=tabs,
-                       subtitle="Uptime is the stored uptime_percentage value; the current pipeline does not recompute it.",
-                       empty="No sensor data has been ingested yet.")
-
-
-# --------------------------------------------------------------------------
 # AI monitoring
 # --------------------------------------------------------------------------
 @admin_bp.route("/admin/ai")
@@ -516,7 +479,6 @@ def settings(conn):
         "admin/settings.html", active="settings", title="Settings", db_ok=ok, db_msg=msg, facts=facts,
         supabase=sb.public_status(), admin_email=sb.admin_email(), audit=ad.recent_audit(conn),
         config={"Active window (minutes)": ad.ACTIVE_MINUTES, "Recently-active window (minutes)": ad.RECENT_MINUTES,
-                "Sensor active window (minutes)": ad.SENSOR_ACTIVE_MINUTES,
                 "Heartbeat interval (seconds)": auth.HEARTBEAT_SECONDS,
                 "Admin session (hours)": auth.ADMIN_SESSION_HOURS, "Admin idle timeout (minutes)": auth.ADMIN_IDLE_MINUTES,
                 "Public sign-up": "enabled" if auth.ALLOW_SIGNUP else "disabled"})
@@ -577,13 +539,6 @@ def api_alert_stats(conn):
 @api_view
 def api_agri_stats(conn):
     return {"overview": ad.agri_stats(conn), "crops": ad.crops_summary(conn)}
-
-
-@admin_bp.route("/api/admin/sensor-stats")
-@auth.admin_required
-@api_view
-def api_sensor_stats(conn):
-    return ad.sensor_stats(conn)
 
 
 @admin_bp.route("/api/admin/ai-stats")

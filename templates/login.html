@@ -14,6 +14,12 @@
         <input class="form-control" type="password" id="password" name="password" required autocomplete="current-password"></div>
       <button class="btn btn-primary w-100" type="submit">Sign in</button>
     </form>
+    {% if totp_available %}
+    <div class="alert alert-info alert-sm mt-3 mb-0">
+      <i class="fas fa-shield-alt me-1"></i>
+      If you have set up two-factor authentication, you will be prompted to enter your verification code after signing in.
+    </div>
+    {% endif %}
     {% if allow_signup %}<p class="small text-center mt-3 mb-0">No account? <a href="{{ url_for('auth.signup') }}">Create one</a></p>{% endif %}
   </div></div>
 </div></div>

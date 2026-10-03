@@ -18,7 +18,6 @@ import db
 
 ACTIVE_MINUTES = 5          # Active         : last_seen_at within 5 minutes
 RECENT_MINUTES = 60         # Recently active: within 60 minutes (but not active)
-SENSOR_ACTIVE_MINUTES = 60  # Active sensor  : status 'active' and a reading within 60 minutes
 PER_PAGE_DEFAULT = 20
 
 _PRESENCE_CASE = f"""
@@ -88,9 +87,7 @@ def overview_stats(conn):
           (SELECT COUNT(*) FROM weather_data)                                     AS weather_records,
           (SELECT COUNT(*) FROM weather_alerts WHERE is_active)                   AS active_alerts,
           (SELECT COUNT(*) FROM farms)                                            AS total_farms,
-          (SELECT COUNT(*) FROM fields)                                           AS total_fields,
-          (SELECT COUNT(*) FROM sensor_health WHERE status = 'active'
-              AND last_reading_at >= now() - interval '{SENSOR_ACTIVE_MINUTES} minutes') AS active_sensors
+          (SELECT COUNT(*) FROM fields)                                           AS total_fields
     """).fetchone()
     return dict(row)
 
@@ -505,69 +502,6 @@ def yield_page(conn, q="", page=1, per_page=PER_PAGE_DEFAULT):
 
 
 # --------------------------------------------------------------------------
-# Sensors
-# --------------------------------------------------------------------------
-def sensor_stats(conn):
-    row = conn.execute(f"""
-        SELECT (SELECT COUNT(*) FROM sensor_health) AS total,
-               (SELECT COUNT(*) FROM sensor_health WHERE status = 'active'
-                   AND last_reading_at >= now() - interval '{SENSOR_ACTIVE_MINUTES} minutes') AS active,
-               (SELECT COUNT(*) FROM sensor_health WHERE status = 'active'
-                   AND (last_reading_at IS NULL OR last_reading_at < now() - interval '{SENSOR_ACTIVE_MINUTES} minutes')) AS stale,
-               (SELECT COUNT(*) FROM sensor_health WHERE status <> 'active') AS inactive,
-               (SELECT AVG(quality_score_avg) FROM sensor_health) AS avg_quality,
-               (SELECT COUNT(*) FROM raw_sensor_readings WHERE received_at >= now() - interval '24 hours') AS readings_24h,
-               (SELECT COUNT(*) FROM sensor_pipeline_logs) AS pipeline_logs,
-               (SELECT (100.0 * SUM(validation_failures) / NULLIF(SUM(total_records), 0))::float8
-                  FROM sensor_quality_metrics) AS failure_rate
-    """).fetchone()
-    return dict(row)
-
-
-def sensors_status_page(conn, q="", page=1, per_page=PER_PAGE_DEFAULT):
-    clauses, params = [], []
-    if q:
-        clauses.append("sh.sensor_id ILIKE %s")
-        params.append(f"%{db.like_escape(q)}%")
-    result = paged(
-        conn,
-        "sh.sensor_id, t.sensor_type, t.field_id, sh.last_reading_at, sh.status, sh.uptime_percentage, "
-        "sh.quality_score_avg, sh.calibration_date, "
-        f"(sh.status = 'active' AND sh.last_reading_at >= now() - interval '{SENSOR_ACTIVE_MINUTES} minutes') AS is_live",
-        "sensor_health sh LEFT JOIN LATERAL (SELECT sensor_type, field_id FROM validated_sensor_readings v "
-        "WHERE v.sensor_id = sh.sensor_id ORDER BY v.timestamp DESC LIMIT 1) t ON TRUE",
-        _where(clauses), params, "sh.last_reading_at DESC NULLS LAST, sh.sensor_id", page, per_page)
-    for r in result["rows"]:
-        r["last_reading_rel"] = rel_time(r["last_reading_at"])
-    return result
-
-
-def sensor_quality_page(conn, q="", page=1, per_page=PER_PAGE_DEFAULT):
-    clauses, params = [], []
-    if q:
-        clauses.append("sensor_id ILIKE %s")
-        params.append(f"%{db.like_escape(q)}%")
-    return paged(
-        conn,
-        "sensor_id, total_records, validation_failures, duplicate_records, outlier_corrections, "
-        "(100.0 * validation_failures / NULLIF(total_records, 0))::float8 AS failure_rate, updated_at",
-        "sensor_quality_metrics", _where(clauses), params, "updated_at DESC, sensor_id", page, per_page)
-
-
-def sensor_logs_page(conn, q="", page=1, per_page=PER_PAGE_DEFAULT):
-    clauses, params = [], []
-    if q:
-        like = f"%{db.like_escape(q)}%"
-        clauses.append("(sensor_id ILIKE %s OR location ILIKE %s)")
-        params += [like, like]
-    return paged(
-        conn,
-        "log_id, sensor_id, source, location, quality_label, validation_score, "
-        "decision_payload ->> 'severity' AS severity, quality_flags::text AS quality_flags, created_at",
-        "sensor_pipeline_logs", _where(clauses), params, "created_at DESC, log_id DESC", page, per_page)
-
-
-# --------------------------------------------------------------------------
 # AI monitoring
 # --------------------------------------------------------------------------
 def ai_stats(conn):
@@ -631,7 +565,6 @@ _SERIES = {                       # key -> (table, timestamp column) -- whitelis
     "weather": ("weather_data", "recorded_at"),
     "alerts": ("weather_alerts", "created_at"),
     "farms": ("farms", "created_at"),
-    "sensors": ("raw_sensor_readings", "received_at"),
 }
 
 
@@ -693,7 +626,6 @@ def all_analytics(conn, days=30):
         "weather": daily_counts(conn, "weather", days),
         "alerts": daily_counts(conn, "alerts", days),
         "farms": daily_counts(conn, "farms", days),
-        "sensors": daily_counts(conn, "sensors", days),
         "predictions": prediction_series(conn, days),
     }
 

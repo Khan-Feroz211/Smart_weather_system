@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS public.users (
     username        text NOT NULL,
     email           text NOT NULL,
     location        text NOT NULL DEFAULT '',
+    phone_number    text,                                   -- E.164 phone for SMS / WhatsApp notifications
+    totp_secret     text,                                   -- TOTP shared secret (NULL = 2FA not set up)
+    two_factor_pending boolean NOT NULL DEFAULT FALSE,      -- set TRUE when user opts into 2FA during signup
     preferences     jsonb,
     role            text NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
     is_active       boolean NOT NULL DEFAULT true,
@@ -115,8 +118,11 @@ BEGIN
         v_candidate := v_base || v_n::text;
     END LOOP;
 
-    INSERT INTO public.users (id, auth_user_id, username, email, location)
-    VALUES (p_auth_id, p_auth_id, v_candidate, lower(p_email), coalesce(p_meta ->> 'location', ''))
+    INSERT INTO public.users (id, auth_user_id, username, email, location,
+                              phone_number, two_factor_pending)
+    VALUES (p_auth_id, p_auth_id, v_candidate, lower(p_email), coalesce(p_meta ->> 'location', ''),
+            p_meta ->> 'phone_number',
+            coalesce((p_meta ->> 'enable_2fa')::boolean, FALSE))
     ON CONFLICT DO NOTHING;
     RETURN p_auth_id;
 END $$;
@@ -578,6 +584,49 @@ CREATE POLICY users_read_own ON public.users FOR SELECT TO authenticated
 DROP POLICY IF EXISTS users_update_own ON public.users;
 CREATE POLICY users_update_own ON public.users FOR UPDATE TO authenticated
     USING (auth_user_id = auth.uid()) WITH CHECK (auth_user_id = auth.uid());
-GRANT UPDATE (username, location, preferences) ON public.users TO authenticated;
+GRANT UPDATE (username, location, preferences, phone_number) ON public.users TO authenticated;
 
 -- admin_users has no write policy for anyone: only the backend (owner role) can change it.
+
+-- -----------------------------------------------------------------------------
+-- 9a. Idempotent migration: add 2FA + notification columns to existing databases
+-- -----------------------------------------------------------------------------
+-- Safe to run on a fresh database (columns already exist from the CREATE TABLE)
+-- and on existing databases that predate this feature.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'phone_number'
+    ) THEN
+        ALTER TABLE public.users ADD COLUMN phone_number text;
+        COMMENT ON COLUMN public.users.phone_number IS
+            'E.164 phone number for SMS / WhatsApp notifications';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'totp_secret'
+    ) THEN
+        ALTER TABLE public.users ADD COLUMN totp_secret text;
+        COMMENT ON COLUMN public.users.totp_secret IS
+            'TOTP shared secret; NULL means 2FA is not set up';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'two_factor_pending'
+    ) THEN
+        ALTER TABLE public.users ADD COLUMN two_factor_pending boolean NOT NULL DEFAULT FALSE;
+        COMMENT ON COLUMN public.users.two_factor_pending IS
+            'TRUE when user opted into 2FA during signup but has not completed setup';
+    END IF;
+
+    -- Index for quick lookups during login
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'users'
+        AND indexname = 'users_totp_secret_idx'
+    ) THEN
+        CREATE INDEX users_totp_secret_idx ON public.users (id) WHERE totp_secret IS NOT NULL;
+    END IF;
+END $$;

@@ -12,6 +12,11 @@
 ## Table of Contents
 
 - [Quick Start](#quick-start)
+- [Web Pages & Routes](#web-pages--routes)
+- [Authentication & 2FA](#authentication--2fa)
+- [Notification System](#notification-system)
+- [Recent Activity Management](#recent-activity-management)
+- [Color Scheme](#color-scheme)
 - [System Architecture](#system-architecture)
 - [Phase 1: Stacking Ensemble](#phase-1-stacking-ensemble)
 - [Phase 2: Advanced Feature Engineering](#phase-2-advanced-feature-engineering)
@@ -49,19 +54,31 @@ python app_clean.py
 # Then open http://localhost:8000 in your browser
 ```
 
+**Default login**: After starting the app, visit `/access` to sign up or log in.
+
+
 ---
 
 ## Project Structure
 
 ```text
 Smart_weather_system/
-├── app_clean.py              # Main Flask + SocketIO web server
+├── app_clean.py              # Main Flask + SocketIO web server (dashboard, web routes)
 ├── api_routes.py             # AgriAdvisor REST API blueprint (/api/agri/)
+├── auth.py                   # Authentication, session, CSRF, 2FA routes & helpers
+├── totp_auth.py              # TOTP 2FA: secret generation, QR codes, code verification
+├── notifications.py          # Multi-channel notification system (WhatsApp → SMS → local)
+├── db.py                     # Database abstraction layer
+├── supabase_client.py        # Supabase client initialization
+├── admin_routes.py           # Admin panel blueprint with 2FA-aware login
 ├── check_routes.py           # Route health-check / smoke test
 ├── requirements.txt          # Pinned Python dependencies
 ├── docker-compose.yml        # web + mosquitto (MQTT) services
 ├── Dockerfile
 ├── run_app.bat / start.bat   # Windows launch helpers
+├── start_app.py              # Application entry point (banner + server start)
+├── .env.example              # Environment variable template
+├── .env                      # Local environment (not committed)
 │
 ├── data/                     # Bundled research datasets (Git LFS)
 │   ├── __init__.py
@@ -75,8 +92,26 @@ Smart_weather_system/
 │   └── sensors-25-07098-v2.pdf
 │
 ├── templates/                # Jinja2 HTML templates
-├── static/                   # CSS / JS / favicon assets
-├── mosquitto/                # MQTT broker config & data
+│   ├── base.html              # Base layout (nav bar, header, footer)
+│   ├── dashboard.html         # Weather dashboard
+│   ├── access.html            # Combined sign-in / create-account page
+│   ├── signup.html            # Registration (phone + 2FA fields)
+│   ├── login.html             # Login page (2FA note)
+│   ├── 2fa_setup.html         # TOTP QR + secret enrollment
+│   ├── 2fa_verify.html        # 6-digit TOTP code entry
+│   ├── profile.html           # User profile page
+│   ├── agri_alerts.html       # Hazard alerts display
+│   ├── disease_detection.html # Plant disease scanner (image upload)
+│   ├── weather_display.html   # Weather cards with AI predictions
+│   ├── full_weather_map.html  # Interactive Pakistan weather map with station markers
+│   └── ... (other templates)
+│
+├── static/css/               # CSS assets
+│   ├── agri-theme.css         # Theme variables & component styles
+│   ├── style.css              # Dashboard & UI component styles
+│   └── admin.css              # Admin panel styles
+├── static/js/
+│   └── script.js             # Frontend interactivity
 │
 ├── stacking_ensemble.py      # Phase 1 — Stacking ensemble classifier
 ├── feature_engineering.py    # Phase 2 — Temporal & interaction features
@@ -97,7 +132,12 @@ Smart_weather_system/
 ├── sensor_ingestion.py
 ├── sensor_simulation.py
 ├── trend_visualization.py
+├── supabase/
+│   └── schema.sql            # Database schema with 2FA + phone columns
 └── tests/                    # Unit + integration tests
+    ├── test_admin_security.py
+    ├── test_auth_2fa.py      # Authentication & 2FA test suite
+    └── fake_db.py            # Test database mock
 ```
 
 > Large binary/data files (`.csv`, `.pdf`, `.ipynb`, model weights) are tracked
@@ -137,6 +177,122 @@ df = load_agriculture_dataset(crop_type="Wheat", sample=1000)
 | Asset | Location | Description |
 |---|---|---|
 | `sensors-25-07098-v2.pdf` | `docs/` | MDPI *Sensors* journal paper (Vol. 25, Issue 7098) referenced by the satellite/NDVI analysis layer (`geovis_satellite.py`). |
+
+---
+
+## Web Pages & Routes
+
+| Page | URL | Description |
+|------|-----|-------------|
+| Dashboard | `/` or `/dashboard` | Main weather dashboard with AI predictions, recent activities, quick actions |
+| Access | `/access` | Combined sign-in / create-account gateway with phone + 2FA |
+| Signup | `/signup` | User registration with phone number and optional TOTP 2FA |
+| Login | `/login` | User login (redirects to 2FA verify if enabled) |
+| Agriculture | `/agri` | AgriAdvisor v6 symptom checker (offline-safe, 100+ crops) |
+| Disease Scanner | `/agri/disease-detection` | Image-based plant disease detection |
+| Weather | `/weather` | Current weather data and forecasts |
+| Weather Map | `/weather/map` | Interactive Pakistan map with 8 city weather stations |
+| Agri Alerts | `/alerts` | Active weather and hazard alerts |
+| Recommendations | `/recommendations` | AI-powered farming recommendations |
+| Create User | `/add_user` | Admin-only: create new user accounts |
+| Admin Panel | `/admin/login` | Administrative dashboard (protected) |
+| 2FA Setup | `/2fa/setup` | QR-based TOTP enrollment screen |
+| 2FA Verify | `/2fa/verify` | Enter 6-digit TOTP code to complete login |
+
+### Authentication Routes
+
+| Route | Method | Auth Required | Description |
+|-------|--------|--------------|-------------|
+| `/access` | GET | No | Combined sign-in / create-account page |
+| `/signup` | GET, POST | No | Register with phone + optional 2FA |
+| `/login` | GET, POST | No | Login (redirects to `/2fa/verify` if 2FA enabled) |
+| `/logout` | POST | Yes | Log out and clear session |
+| `/profile` | GET | Yes | View/edit user profile |
+| `/2fa/setup` | GET, POST | Yes | Set up TOTP 2FA (QR + secret) |
+| `/2fa/verify` | GET, POST | Yes | Enter TOTP code (redirects if pending 2FA setup) |
+| `/2fa/disable` | POST | Yes | Disable TOTP 2FA (CSRF-protected) |
+| `/2fa/send-test` | POST | Yes | Send a test notification (CSRF-protected) |
+| `/dashboard/activity/{id}/delete` | POST | Yes | Delete a recent activity (CSRF-protected) |
+
+## Authentication & 2FA
+
+The system supports secure authentication with optional **TOTP-based Two-Factor Authentication**:
+
+### Features
+- **Email/password login** via Supabase Auth
+- **TOTP 2FA** — Time-based One-Time Password using any authenticator app (Google Authenticator, Authy, Microsoft Authenticator, etc.)
+- **QR code enrollment** — Scan a QR code to link your authenticator app instantly
+- **Recovery codes** — Generate backup codes for account recovery
+- **Pending 2FA setup** — If 2FA is enabled during signup but not yet configured, the user is redirected to set it up on next login
+
+### Setup Flow
+1. Sign up at `/signup` with email, password, phone number, and check **"Enable 2FA"**
+2. After signup, visit `/2fa/setup` to see your QR code and secret key
+3. Scan the QR code with your authenticator app
+4. Enter the 6-digit code to verify and activate 2FA
+5. On every subsequent login, enter your TOTP code at `/2fa/verify`
+
+### Configuration
+```env
+# .env
+TWO_FACTOR_ISSUER=SmartWeather
+```
+
+### Dependencies
+- `pyotp==2.10.0` — TOTP code generation and verification
+- `qrcode==8.2` — QR code generation for easy authenticator app pairing
+
+---
+
+## Notification System
+
+The system sends weather alerts and activity notifications via a **multi-channel fallback strategy**:
+
+### Channel Priority
+1. **WhatsApp** — Primary channel (via Twilio)
+2. **SMS** — Twilio SMS fallback
+3. **Local SMS Gateway** — HTTP endpoint fallback (for air-gapped / low-connectivity environments)
+4. **Log-only** — When no channel is available, notifications are logged
+
+### Configuration
+```env
+# .env
+TWILIO_ACCOUNT_SID=your_twilio_sid
+TWILIO_AUTH_TOKEN=your_twilio_token
+TWILIO_SMS_FROM=+1234567890
+TWILIO_WHATSAPP_FROM=whatsapp:+1234567890
+LOCAL_SMS_GATEWAY_URL=http://localhost:9099/sms
+NOTIFICATION_ENABLED=True
+```
+
+### Phone Validation
+Phone numbers are validated for international format (E.164: `+[country code][number]`, 8–15 digits).
+
+---
+
+## Recent Activity Management
+
+Dashboard shows the 5 most recent user activities. **Logged-in users can delete individual activities**:
+
+- Click the 🗑️ **trash icon** next to any activity row
+- Requires a valid **CSRF token** and active session
+- Deletes the activity from the `user_activities` table
+- Shows a confirmation flash message after deletion
+
+**Route**: `POST /dashboard/activity/{activity_id}/delete` (CSRF-protected, login required)
+
+---
+
+## Color Scheme
+
+| Role | Variable | Hex |
+|------|----------|-----|
+| Primary | `--primary`, `--color-primary` | `#DCEEFF` 🩵 |
+| Secondary | `--secondary`, `--color-secondary` | `#DDF5F0` 🌿 |
+| Background | `--dark-bg`, `--color-surface` | `#F8FAFC` 🤍 |
+| Text | `--text-dark`, `--color-text` | `#1E293B` |
+
+All CSS files (`agri-theme.css`, `style.css`, `admin.css`) use this unified palette. Dark mode variants are available via `[data-bs-theme="dark"]`.
 
 ---
 
@@ -422,6 +578,8 @@ Test coverage includes:
 - Yield estimator and crop suitability connectivity degradation
 - RecommendationEngine output formatting and engine-status header precision
 - Flask API routes integration (`/api/agri/analyze`, `/api/agri/feedback`, `/api/agri/status`)
+- Authentication & 2FA flows (signup, login, TOTP verification, disable)
+- Admin security (CSRF, session, route protection)
 
 ---
 
@@ -436,6 +594,13 @@ Configuration is managed via environment variables (see `.env.example`):
 | `DEBUG` | `True` | Enable Flask debug mode |
 | `SENSOR_MODE` | `simulation` | `simulation` (mock sensors) or `real` (live sensor ingestion) |
 | `AGRI_DB_PATH` | `smart_weather.db` | SQLite database path for AgriAdvisor feedback storage |
+| `TWO_FACTOR_ISSUER` | `SmartWeather` | TOTP issuer name shown in authenticator apps |
+| `TWILIO_ACCOUNT_SID` | — | Twilio account SID for WhatsApp/SMS notifications |
+| `TWILIO_AUTH_TOKEN` | — | Twilio auth token for WhatsApp/SMS notifications |
+| `TWILIO_SMS_FROM` | — | Twilio phone number for SMS |
+| `TWILIO_WHATSAPP_FROM` | — | Twilio WhatsApp number (e.g. `whatsapp:+1234567890`) |
+| `LOCAL_SMS_GATEWAY_URL` | — | HTTP endpoint for local SMS gateway fallback |
+| `NOTIFICATION_ENABLED` | `True` | Enable/disable notification system |
 
 ### Environment Variables Reference
 ```bash
@@ -444,6 +609,19 @@ SECRET_KEY=your_secret_key_here
 OPENWEATHER_API_KEY=your_openweather_api_key
 DEBUG=False
 SENSOR_MODE=simulation
+AGRI_DB_PATH=smart_weather.db
+
+# 2FA
+TWO_FACTOR_ISSUER=SmartWeather
+
+# Notifications (WhatsApp → SMS → local gateway)
+TWILIO_ACCOUNT_SID=your_twilio_sid
+TWILIO_AUTH_TOKEN=your_twilio_token
+TWILIO_SMS_FROM=+1234567890
+TWILIO_WHATSAPP_FROM=whatsapp:+1234567890
+LOCAL_SMS_GATEWAY_URL=http://localhost:9099/sms
+NOTIFICATION_ENABLED=True
+```
 AGRI_DB_PATH=smart_weather.db
 ```
 
@@ -1498,6 +1676,21 @@ apscheduler==3.10.4       # Task scheduling
 - Detailed charts (temperature trends, humidity, pressure)
 - Historical data graphs
 - Search for new locations
+
+---
+
+#### `templates/full_weather_map.html`
+**Purpose**: Interactive Pakistan weather map with city markers and weather details.
+
+**Features**:
+- Leaflet.js map centered on Pakistan with 8 city weather stations (Lahore, Islamabad, Peshawar, Multan, Karachi, Quetta, Faisalabad, Rawalpindi)
+- City markers with live weather popups (temperature, condition, humidity, wind)
+- Weather details sidebar showing selected city's full conditions (temp, condition icon, humidity, wind, pressure)
+- Search bar to jump to any supported city
+- Zoom in/out, reset view, and fullscreen toggle controls
+- WebSocket sync — selecting a city on the map sends a real-time weather request
+
+**Route**: `GET /weather/map`
 
 ---
 

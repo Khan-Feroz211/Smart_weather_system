@@ -1113,6 +1113,8 @@ def init_database():
         ('phone_number',          'TEXT DEFAULT NULL'),
         ('notification_channel',  "TEXT DEFAULT 'sms'"),
         ('notifications_enabled', 'INTEGER DEFAULT 1'),
+        ('totp_secret',           'TEXT DEFAULT NULL'),
+        ('two_factor_pending',    'INTEGER DEFAULT 0'),
     ]
     for col_name, col_def in _add_user_columns:
         existing_cols = {r['name'] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
@@ -1810,7 +1812,7 @@ def dashboard():
         total_alerts = conn.execute('SELECT COUNT(*) FROM weather_alerts WHERE is_active = 1').fetchone()[0]
         
         recent_activities = conn.execute('''
-            SELECT u.username, ua.activity_type, ua.weather_condition, ua.activity_date
+            SELECT ua.activity_id, ua.user_id, u.username, ua.activity_type, ua.weather_condition, ua.activity_date
             FROM user_activities ua
             JOIN users u ON ua.user_id = u.user_id
             ORDER BY ua.activity_date DESC LIMIT 5
@@ -1876,6 +1878,38 @@ def dashboard():
         return render_template('dashboard.html', now=datetime.now())
     finally:
         conn.close()
+
+@app.route('/dashboard/activity/<int:activity_id>/delete', methods=['POST'])
+@auth.csrf_protect
+def delete_user_activity(activity_id):
+    """Delete a user activity — requires login + CSRF token."""
+    if not auth.current_user():
+        flash('You must be logged in to delete activities.', 'error')
+        return redirect(url_for('dashboard'))
+    conn = get_db_connection()
+    if not conn:
+        flash('Database connection error', 'error')
+        return redirect(url_for('dashboard'))
+    try:
+        deleted = conn.execute(
+            'DELETE FROM user_activities WHERE activity_id = ?',
+            (activity_id,)
+        ).rowcount
+        conn.commit()
+        if deleted:
+            flash('Activity deleted.', 'info')
+        else:
+            flash('Activity not found.', 'error')
+    except Exception as e:
+        flash(f'Error deleting activity: {e}', 'error')
+    finally:
+        conn.close()
+    return redirect(url_for('dashboard'))
+
+@app.route('/access')
+def user_access():
+    """Combined signup / login gateway shown after the weather dashboard."""
+    return render_template('access.html', now=datetime.now())
 
 @app.route('/users')
 def user_management():
@@ -2036,6 +2070,11 @@ def add_alert(user_id):
 @app.route('/weather')
 def weather_display():
     return render_template('weather_display.html')
+
+@app.route('/weather/map')
+def full_weather_map():
+    """Full-screen interactive weather map with city markers and details."""
+    return render_template('full_weather_map.html', now=datetime.now())
 
 @app.route('/alerts')
 def alerts():
@@ -3296,7 +3335,7 @@ def sensor_data_export():
 # ============================================================
 
 @app.route('/api/processing/clean/<sensor_type>')
-def clean_sensor_data(sensor_type):
+def api_clean_sensor_data(sensor_type):
     """Clean and validate sensor data with anomaly detection"""
     from data_processing import DataProcessingPipeline
     

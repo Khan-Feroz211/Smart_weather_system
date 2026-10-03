@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Two-factor authentication - Smart AgriWeather{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-md-6 col-lg-4">
+  <div class="card card-futuristic"><div class="card-body p-4">
+    <h4 class="mb-1"><i class="fas fa-key me-2"></i>Two-factor authentication</h4>
+    <p class="text-muted small mb-3">
+      Enter the 6-digit verification code from your authenticator app to complete sign-in.
+    </p>
+
+    <div class="text-center mb-4">
+      <div class="bg-primary bg-opacity-10 rounded-circle d-flex align-items-center justify-content-center mx-auto"
+           style="width: 70px; height: 70px;">
+        <i class="fas fa-shield-check fa-2x text-primary"></i>
+      </div>
+    </div>
+
+    <form method="post" action="{{ url_for('auth.verify_2fa') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="mb-3">
+        <label class="form-label" for="code">Verification code</label>
+        <input class="form-control" type="text" id="code" name="code" inputmode="numeric"
+               pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code"
+               placeholder="000000" autofocus>
+        <div class="form-text">Codes refresh every 30 seconds. If you lose your device, contact an administrator.</div>
+      </div>
+      <button class="btn btn-primary w-100" type="submit"><i class="fas fa-sign-in-alt me-1"></i> Verify &amp; sign in</button>
+    </form>
+
+    <div class="text-center mt-3">
+      <a href="{{ url_for('auth.login') }}" class="small text-muted"><i class="fas fa-arrow-left me-1"></i> Back to sign in</a>
+    </div>
+  </div></div>
+</div></div>
+{% endblock %}

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Set up two-factor authentication - Smart AgriWeather{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-md-6 col-lg-4">
+  <div class="card card-futuristic"><div class="card-body p-4">
+    <h4 class="mb-1"><i class="fas fa-shield-alt me-2"></i>Set up two-factor authentication</h4>
+    <p class="text-muted small mb-3">
+      Scan the QR code below with your authenticator app (Google Authenticator,
+      Authy, Microsoft Authenticator, etc.), then enter the 6-digit code to verify.
+    </p>
+
+    <div class="text-center mb-4">
+      {% if qr_png %}
+        <img src="data:image/png;base64,{{ qr_png }}" alt="TOTP QR code" class="img-fluid border rounded bg-white p-2" style="max-width: 220px;">
+      {% else %}
+        <div class="alert alert-warning">
+          <i class="fas fa-exclamation-triangle me-1"></i>
+          QR code generation is not available. Please enter the secret manually:
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Account (email)</label>
+      <input type="text" class="form-control bg-dark text-light" value="{{ email }}" readonly>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Your secret key</label>
+      <input type="text" class="form-control bg-dark text-light font-monospace" value="{{ secret }}" readonly id="secretKey">
+      <div class="form-text">Enter this code manually in your authenticator app if the QR code doesn't scan.</div>
+    </div>
+
+    <form method="post" action="{{ url_for('auth.setup_2fa') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="mb-3">
+        <label class="form-label" for="code">Authentication code</label>
+        <input class="form-control" type="text" id="code" name="code" inputmode="numeric" pattern="[0-9]{6}"
+               maxlength="6" required autocomplete="one-time-code" placeholder="000000">
+        <div class="form-text">Enter the 6-digit code currently shown in your authenticator app.</div>
+      </div>
+      <button class="btn btn-success w-100" type="submit"><i class="fas fa-check me-1"></i> Verify &amp; enable 2FA</button>
+    </form>
+
+    <div class="text-center mt-3">
+      <a href="#" onclick="location.reload()" class="small text-muted"><i class="fas fa-redo me-1"></i> Regenerate QR code</a>
+    </div>
+  </div></div>
+</div></div>
+{% endblock %}

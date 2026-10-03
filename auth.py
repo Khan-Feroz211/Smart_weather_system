@@ -35,6 +35,8 @@ from flask import (Blueprint, flash, g, jsonify, redirect, render_template,
 
 import db
 import supabase_client as sb
+import totp_auth
+from notifications import send_notification_auto, _is_valid_phone
 
 logger = logging.getLogger(__name__)
 auth_bp = Blueprint("auth", __name__)
@@ -151,7 +153,8 @@ def client_ip():
 # --------------------------------------------------------------------------
 _PROFILE_SQL = """
     SELECT u.id::text AS id, u.user_number, u.username, u.email, u.location, u.role,
-           u.is_active, u.last_seen_at,
+           u.is_active, u.last_seen_at, u.phone_number, u.totp_secret,
+           u.two_factor_pending,
            EXISTS (SELECT 1 FROM admin_users a WHERE a.user_id = u.id AND a.is_active) AS has_admin_record
       FROM users u
      WHERE u.id = %s::uuid
@@ -310,6 +313,17 @@ def verify_credentials(email, password):
             if profile is None or not profile["is_active"]:
                 conn.rollback()
                 raise LoginError("This account has been deactivated.")
+            # Sync phone_number from auth metadata (set during signup) if available
+            meta_phone = (auth_user.get("user_metadata") or {}).get("phone_number")
+            if meta_phone and not profile.get("phone_number"):
+                try:
+                    conn.execute(
+                        "UPDATE users SET phone_number = %s WHERE id = %s::uuid",
+                        (meta_phone, str(pid))
+                    )
+                    conn.commit()
+                except Exception:
+                    logger.debug("Could not sync phone_number from metadata (column may not exist yet)")
             conn.execute(
                 "UPDATE users SET last_login_at = now(), last_seen_at = now(), "
                 "login_count = login_count + 1, is_online = TRUE WHERE id = %s::uuid", (str(pid),))
@@ -396,6 +410,19 @@ def login():
             flash(exc.message, "error")
             return render_template("login.html", next=nxt, email=email), 401
         login_limiter.reset(key)
+
+        # --- Two-factor authentication check ---
+        totp_secret = profile.get("totp_secret")
+        two_factor_pending = profile.get("two_factor_pending")
+        if totp_secret:
+            # 2FA is fully set up → require TOTP code
+            _set_pending_2fa(profile, nxt, step="verify")
+            return redirect(url_for("auth.verify_2fa"))
+        if two_factor_pending:
+            # User opted into 2FA during signup but hasn't completed setup
+            _set_pending_2fa(profile, nxt, step="setup")
+            return redirect(url_for("auth.setup_2fa"))
+
         start_session(profile)
         log_activity("login", user_id=profile["id"])
         flash(f"Welcome back, {profile['username']}!", "success")
@@ -419,6 +446,8 @@ def signup():
         password = request.form.get("password") or ""
         username = (request.form.get("username") or "").strip()
         location = (request.form.get("location") or "").strip()[:80]
+        phone_number = (request.form.get("phone_number") or "").strip()
+        enable_2fa = request.form.get("enable_2fa") == "on"
         errors = []
         if not _EMAIL_RE.match(email):
             errors.append("Enter a valid email address.")
@@ -426,15 +455,26 @@ def signup():
             errors.append("Password must be at least 8 characters.")
         if username and not _USERNAME_RE.match(username):
             errors.append("Username: 3-30 letters, numbers, dots, dashes or underscores.")
+        if phone_number and not _is_valid_phone(phone_number):
+            errors.append("Phone number must be in E.164 format (e.g. +15551234567).")
         if errors:
             for e in errors:
                 flash(e, "error")
-            return render_template("signup.html", email=email, username=username, location=location), 400
+            return render_template("signup.html", email=email, username=username, location=location,
+                                   phone_number=phone_number, enable_2fa=enable_2fa), 400
+        if enable_2fa and not totp_auth.is_available():
+            flash("Two-factor authentication requires the pyotp library, which is not installed.", "error")
+            return render_template("signup.html", email=email, username=username, location=location,
+                                   phone_number=phone_number, enable_2fa=enable_2fa), 400
         signup_limiter.hit(client_ip())
         try:
             meta = {"location": location}
             if username:
                 meta["username"] = username
+            if phone_number:
+                meta["phone_number"] = phone_number
+            if enable_2fa:
+                meta["enable_2fa"] = True
             _user, needs_confirmation = sb.sign_up(email, password, meta)
         except sb.UserAlreadyExists:
             # do not reveal whether the address is registered
@@ -442,15 +482,46 @@ def signup():
             return redirect(url_for("auth.login"))
         except sb.SupabaseNotConfigured:
             flash("Registration is not configured on this server (Supabase keys missing).", "error")
-            return render_template("signup.html", email=email, username=username, location=location), 503
+            return render_template("signup.html", email=email, username=username, location=location,
+                                   phone_number=phone_number, enable_2fa=enable_2fa), 503
         except sb.SupabaseUnavailable:
             flash("The authentication service is unreachable. Please try again shortly.", "error")
-            return render_template("signup.html", email=email, username=username, location=location), 503
+            return render_template("signup.html", email=email, username=username, location=location,
+                                   phone_number=phone_number, enable_2fa=enable_2fa), 503
         except sb.SupabaseError as exc:
             flash(str(exc)[:160] or "Could not create the account.", "error")
-            return render_template("signup.html", email=email, username=username, location=location), 400
-        flash("Account created. Check your email to confirm it, then sign in."
-              if needs_confirmation else "Account created. You can sign in now.", "success")
+            return render_template("signup.html", email=email, username=username, location=location,
+                                   phone_number=phone_number, enable_2fa=enable_2fa), 400
+
+        # Persist phone_number + two-factor-pending flag on the profile
+        auth_id = (_user or {}).get("id")
+        if auth_id:
+            try:
+                with db.connect() as conn:
+                    updates, params = [], []
+                    if phone_number:
+                        updates.append("phone_number = %s")
+                        params.append(phone_number)
+                    if enable_2fa:
+                        updates.append("two_factor_pending = TRUE")
+                    if updates:
+                        params.append(auth_id)
+                        conn.execute(
+                            "UPDATE users SET " + ", ".join(updates) + " WHERE auth_user_id = %s::uuid",
+                            params,
+                        )
+                        conn.commit()
+            except db.DatabaseUnavailable:
+                logger.warning("Could not persist phone_number/2fa flag to profile (db unavailable)")
+            except Exception:
+                logger.exception("Failed to persist phone_number/2fa flag to profile")
+
+        if enable_2fa and totp_auth.is_available():
+            flash("Account created! You will set up two-factor authentication after you confirm your email.",
+                  "success")
+        else:
+            flash("Account created. Check your email to confirm it, then sign in."
+                  if needs_confirmation else "Account created. You can sign in now.", "success")
         return redirect(url_for("auth.login"))
     return render_template("signup.html")
 
@@ -470,6 +541,211 @@ def logout():
     session.clear()
     flash("You have been signed out.", "success")
     return redirect(url_for("dashboard"))
+
+
+# --------------------------------------------------------------------------
+# Two-factor authentication (TOTP)
+# --------------------------------------------------------------------------
+_PENDING_2FA_SECONDS = 600  # 2FA pending state expires after 10 minutes
+
+
+def _set_pending_2fa(profile, next_url, step="verify"):
+    """Store a minimal pending-2FA marker in the session.
+
+    The profile is NOT fully authenticated here — the caller must still prove
+    possession of their authenticator device before ``start_session`` is called.
+    """
+    session.clear()
+    session["pending_2fa"] = {
+        "uid": str(profile["id"]),
+        "email": profile["email"],
+        "username": profile["username"],
+        "step": step,
+        "next": next_url,
+        "created": time.time(),
+    }
+
+
+def _get_pending_2fa():
+    """Return the pending-2FA dict or None (clears expired entries)."""
+    pending = session.get("pending_2fa")
+    if not pending:
+        return None
+    if time.time() - float(pending.get("created", 0)) > _PENDING_2FA_SECONDS:
+        session.pop("pending_2fa", None)
+        return None
+    return pending
+
+
+def _clear_pending_2fa():
+    session.pop("pending_2fa", None)
+
+
+def _load_profile_by_id(uid):
+    """Load a profile by UUID from the DB (used during 2FA flow)."""
+    try:
+        uuid.UUID(str(uid))
+    except (ValueError, TypeError):
+        return None
+    try:
+        with db.connect() as conn:
+            return conn.execute(_PROFILE_SQL, (str(uid),)).fetchone()
+    except db.DatabaseUnavailable:
+        return None
+    except Exception:
+        logger.exception("Could not load profile during 2FA flow")
+        return None
+
+
+@auth_bp.route("/2fa/setup", methods=["GET", "POST"])
+def setup_2fa():
+    """First-time 2FA setup: show QR code, verify a test code, store the secret."""
+    if not totp_auth.is_available():
+        flash("Two-factor authentication is not available on this server.", "error")
+        return redirect(url_for("dashboard"))
+
+    pending = _get_pending_2fa()
+    if not pending or pending.get("step") != "setup":
+        flash("You must complete sign-in first to set up two-factor authentication.", "error")
+        return redirect(url_for("auth.login"))
+
+    if request.method == "POST":
+        code = (request.form.get("code") or "").strip()
+        secret = session.pop("_2fa_setup_secret", None)
+        if not secret or not code:
+            flash("Please enter the code from your authenticator app.", "error")
+            return redirect(url_for("auth.setup_2fa"))
+        if not totp_auth.verify_code(secret, code):
+            flash("Invalid code. Please check your authenticator app and try again.", "error")
+            # keep a fresh secret in session so the user can retry
+            session["_2fa_setup_secret"] = secret
+            return redirect(url_for("auth.setup_2fa"))
+        # Success — persist the secret and clear the pending flag
+        profile = _load_profile_by_id(pending["uid"])
+        if profile and profile["is_active"]:
+            try:
+                with db.connect() as conn:
+                    conn.execute(
+                        "UPDATE users SET totp_secret = %s, two_factor_pending = FALSE "
+                        "WHERE id = %s::uuid", (secret, str(pending["uid"]))
+                    )
+                    conn.commit()
+            except db.DatabaseUnavailable:
+                flash("Database unavailable — 2FA could not be saved. Try again.", "error")
+                session["_2fa_setup_secret"] = secret
+                return redirect(url_for("auth.setup_2fa"))
+            except Exception:
+                logger.exception("Failed to persist TOTP secret")
+                flash("Could not save 2FA settings. Try again.", "error")
+                session["_2fa_setup_secret"] = secret
+                return redirect(url_for("auth.setup_2fa"))
+            _clear_pending_2fa()
+            start_session(profile)
+            log_activity("2fa_enabled", user_id=profile["id"])
+            flash("Two-factor authentication is now enabled. Welcome!", "success")
+            return redirect(pending.get("next") or url_for("dashboard"))
+        flash("Your account could not be loaded. Please try signing in again.", "error")
+        _clear_pending_2fa()
+        return redirect(url_for("auth.login"))
+
+    # GET — generate (or reuse) a secret for this session
+    secret = session.get("_2fa_setup_secret")
+    if not secret:
+        secret = totp_auth.generate_secret()
+        session["_2fa_setup_secret"] = secret
+    uri = totp_auth.get_provisioning_uri(secret, pending["email"])
+    qr_png = totp_auth.generate_qr_base64(uri)
+    return render_template("2fa_setup.html",
+                           email=pending["email"],
+                           secret=secret,
+                           otpauth_uri=uri,
+                           qr_png=qr_png)
+
+
+@auth_bp.route("/2fa/verify", methods=["GET", "POST"])
+def verify_2fa():
+    """2FA verification step during login (user already has TOTP configured)."""
+    if not totp_auth.is_available():
+        flash("Two-factor authentication is not available on this server.", "error")
+        return redirect(url_for("auth.login"))
+
+    pending = _get_pending_2fa()
+    if not pending or pending.get("step") != "verify":
+        flash("You must sign in first to verify your identity.", "error")
+        return redirect(url_for("auth.login"))
+
+    if request.method == "POST":
+        code = (request.form.get("code") or "").strip()
+        if not code:
+            flash("Please enter the 6-digit code from your authenticator app.", "error")
+            return render_template("2fa_verify.html", email=pending["email"]), 400
+        profile = _load_profile_by_id(pending["uid"])
+        if profile is None:
+            flash("Your session expired. Please sign in again.", "error")
+            _clear_pending_2fa()
+            return redirect(url_for("auth.login"))
+        secret = profile.get("totp_secret")
+        if not secret or not totp_auth.verify_code(secret, code):
+            flash("Invalid code. Please try again.", "error")
+            return render_template("2fa_verify.html", email=pending["email"]), 401
+        # Success
+        _clear_pending_2fa()
+        start_session(profile)
+        log_activity("login_2fa", user_id=profile["id"])
+        flash(f"Welcome back, {profile['username']}!", "success")
+        return redirect(pending.get("next") or url_for("dashboard"))
+
+    return render_template("2fa_verify.html", email=pending["email"])
+
+
+@auth_bp.route("/2fa/disable", methods=["POST"])
+@csrf_protect
+def disable_2fa():
+    """Allow a signed-in user to disable 2FA from their profile/settings."""
+    user = current_user()
+    if user is None:
+        flash("Please sign in first.", "error")
+        return redirect(url_for("auth.login"))
+    secret = user.get("totp_secret")
+    if not secret:
+        flash("Two-factor authentication is not enabled.", "info")
+        return redirect(url_for("dashboard"))
+    code = (request.form.get("code") or "").strip()
+    if not totp_auth.verify_code(secret, code):
+        flash("Invalid code — 2FA was not disabled.", "error")
+        return redirect(url_for("dashboard"))
+    try:
+        with db.connect() as conn:
+            conn.execute(
+                "UPDATE users SET totp_secret = NULL WHERE id = %s::uuid", (user["id"],)
+            )
+            conn.commit()
+    except Exception:
+        logger.exception("Failed to disable 2FA")
+        flash("Could not disable 2FA. Please try again.", "error")
+        return redirect(url_for("dashboard"))
+    flash("Two-factor authentication has been disabled.", "success")
+    log_activity("2fa_disabled", user_id=user["id"])
+    # Force session refresh so current_user() picks up the change
+    g.pop("_user_loaded", None)
+    g.pop("_user", None)
+    return redirect(url_for("dashboard"))
+
+
+@auth_bp.route("/2fa/send-test", methods=["POST"])
+@csrf_protect
+def send_2fa_test_notification():
+    """Send a test notification via WhatsApp (auto-fallback to local SMS)."""
+    user = current_user()
+    if user is None:
+        return jsonify({"ok": False, "error": "not_authenticated"}), 401
+    phone = user.get("phone_number")
+    if not phone or not _is_valid_phone(phone):
+        return jsonify({"ok": False, "error": "No valid phone number on your account"}), 400
+    result = send_notification_auto(phone, "🔐 Smart AgriWeather 2FA test — your verification channel works!")
+    return jsonify({"ok": result.get("success", False),
+                    "channel": result.get("channel"),
+                    "result": result})
 
 
 @auth_bp.route("/api/heartbeat", methods=["POST"])
@@ -501,11 +777,13 @@ def heartbeat():
 # App wiring
 # --------------------------------------------------------------------------
 def _inject():
+    user = current_user()
     return {
-        "current_user": current_user(),
+        "current_user": user,
         "csrf_token": csrf_token,
         "heartbeat_seconds": HEARTBEAT_SECONDS,
         "allow_signup": ALLOW_SIGNUP,
+        "totp_available": totp_auth.is_available,
     }
 
 
@@ -514,7 +792,7 @@ def _security_headers(response):
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     path = request.path
-    if path.startswith(("/admin", "/api/admin", "/login", "/signup", "/api/heartbeat")):
+    if path.startswith(("/admin", "/api/admin", "/login", "/signup", "/2fa", "/api/heartbeat", "/dashboard/activity")):
         response.headers["Cache-Control"] = "no-store"
     return response
 

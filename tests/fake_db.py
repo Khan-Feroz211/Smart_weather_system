@@ -67,6 +67,11 @@ def default_value(name):
         return "active"
     if n.startswith("is_") or n in ("has_admin_record", "is_live"):
         return True
+    # Columns that should default to None/False for safety in tests
+    if n in ("totp_secret", "phone_number"):
+        return None
+    if n == "two_factor_pending":
+        return False
     if n.endswith(("_at", "_date", "timestamp", "_time", "date")) or n in ("day",):
         return TS
     if n in ("role",):

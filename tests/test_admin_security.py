@@ -37,7 +37,8 @@ from fake_db import FakeDB  # noqa: E402
 ADMIN_ID = str(uuid.uuid4())
 USER_ID = str(uuid.uuid4())
 OTHER_ID = str(uuid.uuid4())
-PROFILE_COLS = ["id", "user_number", "username", "email", "location", "role", "is_active", "last_seen_at", "has_admin_record"]
+PROFILE_COLS = ["id", "user_number", "username", "email", "location", "role", "is_active", "last_seen_at", "has_admin_record",
+                "phone_number", "totp_secret", "two_factor_pending"]
 
 
 def make_app():
@@ -63,8 +64,8 @@ class Base(unittest.TestCase):
         self.addCleanup(p.stop)
         auth.login_limiter._hits.clear()
 
-    def profile(self, uid, role="user", active=True, admin_record=False):
-        return (PROFILE_COLS, [(uid, 1, "someone", "s@x.com", "Lahore", role, active, "2026-09-19 09:59:00", admin_record)])
+    def profile(self, uid, role="user", active=True, admin_record=False, totp_secret=None, two_factor_pending=False):
+        return (PROFILE_COLS, [(uid, 1, "someone", "s@x.com", "Lahore", role, active, "2026-09-19 09:59:00", admin_record, None, totp_secret, two_factor_pending)])
 
     def login_as(self, uid, role="user", admin_session=False, admin_record=None, active=True, age=0, idle=0):
         self.fake.on("AS has_admin_record", *self.profile(uid, role, active, role == "admin" if admin_record is None else admin_record))
@@ -82,11 +83,11 @@ class Base(unittest.TestCase):
 class TestAuthorization(Base):
     ADMIN_GETS = ["/admin", "/admin/dashboard", "/admin/users", "/admin/users/active", "/admin/activity",
                   "/admin/weather", "/admin/alerts", "/admin/farms", "/admin/fields", "/admin/crops",
-                  "/admin/crop-health", "/admin/yield-forecasts", "/admin/sensors", "/admin/ai",
+                  "/admin/crop-health", "/admin/yield-forecasts", "/admin/ai",
                   "/admin/analytics", "/admin/settings", f"/admin/users/{USER_ID}"]
     API_GETS = ["/api/admin/stats", "/api/admin/users", "/api/admin/active-users", "/api/admin/activity",
                 "/api/admin/weather-stats", "/api/admin/alert-stats", "/api/admin/agriculture-stats",
-                "/api/admin/sensor-stats", "/api/admin/ai-stats", "/api/admin/analytics"]
+                "/api/admin/ai-stats", "/api/admin/analytics"]
 
     def test_unauthenticated_pages_redirect_to_admin_login(self):
         for path in self.ADMIN_GETS:
@@ -154,7 +155,6 @@ class TestAdminPages(Base):
 
     def test_every_admin_page_renders(self):
         paths = TestAuthorization.ADMIN_GETS + ["/admin/alerts?type=agri", "/admin/alerts?type=hazard&status=active&severity=critical&q=a",
-                                                "/admin/sensors?tab=quality", "/admin/sensors?tab=logs", "/admin/sensors?tab=status&q=s",
                                                 "/admin/users?q=a&role=user&status=offline&sort=last_active&dir=asc&page=2",
                                                 "/admin/analytics?days=7", "/admin/activity?type=login&q=a", "/admin/ai?status=pending"]
         for path in paths:
@@ -170,8 +170,8 @@ class TestAdminPages(Base):
 
     def test_dashboard_numbers_come_from_the_database(self):
         cols = ["total_users", "active_users", "new_users_today", "weather_records", "active_alerts",
-                "total_farms", "total_fields", "active_sensors"]
-        self.fake.on("AS total_users", cols, [(128, 24, 5, 1245, 18, 7, 19, 4)])
+                "total_farms", "total_fields"]
+        self.fake.on("AS total_users", cols, [(128, 24, 5, 1245, 18, 7, 19)])
         html = self.client.get("/admin/dashboard").get_data(as_text=True)
         for n in ("128", "24", "1,245", "18"):
             self.assertIn(n, html)

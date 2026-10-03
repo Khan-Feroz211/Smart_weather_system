@@ -306,28 +306,5 @@
 
   </div><!-- /row -->
 
-  <!-- Live AI Health API Button -->
-  <div class="row mt-4">
-    <div class="col">
-      <div class="card-futuristic">
-        <div class="card-body d-flex align-items-center gap-3">
-          <i class="fas fa-robot fa-2x text-primary"></i>
-          <div class="flex-grow-1">
-            <div class="fw-bold">Live AI Health Computation</div>
-            <div class="text-muted small">Fetch real-time weather and compute live health score, pest risks, irrigation need, and yield forecast via REST API.</div>
-          </div>
-          <a href="/api/agri/health/{{ field.field_id }}" target="_blank"
-             class="btn btn-primary btn-futuristic">
-            <i class="fas fa-code me-1"></i> View API Response
-          </a>
-          <a href="/api/agri/forecast/{{ field.field_id }}" target="_blank"
-             class="btn btn-outline-info btn-futuristic">
-            <i class="fas fa-cloud-sun-rain me-1"></i> 7-Day Forecast
-          </a>
-        </div>
-      </div>
-    </div>
-  </div>
-
 </div>
 {% endblock %}

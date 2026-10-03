@@ -9,7 +9,6 @@
   {'id':'active_alerts','label':'Active Weather Alerts','value':stats.active_alerts,'icon':'fa-bell','tone':'danger','kind':'num'},
   {'id':'total_farms','label':'Total Farms','value':stats.total_farms,'icon':'fa-tractor','tone':'success','kind':'num'},
   {'id':'total_fields','label':'Total Fields','value':stats.total_fields,'icon':'fa-vector-square','tone':'warning','kind':'num'},
-  {'id':'active_sensors','label':'Active Sensors','value':stats.active_sensors,'icon':'fa-satellite-dish','tone':'info','kind':'num','hint':'reading within ' ~ sensor_minutes ~ ' min'},
 ] %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div class="small text-muted"><span class="live-dot me-1"></span>Live figures from Supabase · refreshes every 30 s</div>
@@ -48,7 +47,7 @@
 (function () {
   var ov;
   function paint(d) {
-    ['total_users','active_users','new_users_today','weather_records','active_alerts','total_farms','total_fields','active_sensors'].forEach(function (k) {
+    ['total_users','active_users','new_users_today','weather_records','active_alerts','total_farms','total_fields'].forEach(function (k) {
       var el = document.querySelector('[data-stat="' + k + '"]'); if (el && d[k] !== undefined) el.textContent = Number(d[k]).toLocaleString();
     });
     Object.keys(d.presence || {}).forEach(function (k) { var el = document.querySelector('[data-presence="' + k + '"]'); if (el) el.textContent = d.presence[k]; });
