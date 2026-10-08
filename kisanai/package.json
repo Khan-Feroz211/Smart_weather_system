@@ -1,0 +1,40 @@
+{
+  "name": "kisanai",
+  "version": "1.0.0",
+  "description": "KisanAI — offline-first Android app for smallholder farmers (Capacitor + framework-free web)",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "gen:config": "node scripts/gen-config.js",
+    "start": "concurrently \"npm run gen:config -- -w\" \"http-server -c-1 -p 8080 -a 0.0.0.0 www\"",
+    "build": "npm run gen:config && echo \"No bundler: webDir is the source folder. Run 'npx cap copy android' to package.\"",
+    "cap:add:android": "npx cap add android",
+    "cap:copy": "npx cap copy android",
+    "cap:open": "npx cap open android",
+    "dev": "npm run gen:config -- -w",
+    "fetch-fonts": "node scripts/fetch-fonts.js",
+    "gen-icons": "node scripts/gen-icons.js",
+    "lint": "node scripts/lint.js",
+    "lint:full": "node scripts/lint.js",
+    "test": "node scripts/tests.mjs"
+  },
+  "dependencies": {
+    "@capacitor/core": "^7.4.0",
+    "@capacitor/android": "^7.4.0",
+    "@capacitor/geolocation": "^7.1.8",
+    "@capacitor/camera": "^7.0.5",
+    "@capacitor/local-notifications": "^7.0.7",
+    "@capacitor-community/sqlite": "^7.0.3",
+    "@capacitor/preferences": "^7.0.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.6.9",
+    "http-server": "^14.1.1",
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=18",
+    "npm": ">=9"
+  }
+}
