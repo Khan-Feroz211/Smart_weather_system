@@ -15,6 +15,7 @@
     "dev": "npm run gen:config -- -w",
     "fetch-fonts": "node scripts/fetch-fonts.js",
     "gen-icons": "node scripts/gen-icons.js",
+    "preview": "node scripts/preview.js",
     "lint": "node scripts/lint.js",
     "lint:full": "node scripts/lint.js",
     "test": "node scripts/tests.mjs"
