@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <!-- Viewport: width=device-width so dp units resolve to CSS pixels at 1:1. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#2E7D32">
+  <meta name="description" content="KisanAI — offline-first weather & crop advisory for smallholder farmers">
+  <title>KisanAI</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preload" as="font" type="font/ttf" href="assets/fonts/NotoNastaliq-Regular.ttf" crossorigin>
+</head>
+<body>
+  <!--
+    Framework-free.  All views are rendered by app.js into #app.
+    The bottom nav is always available (8 features + settings).
+  -->
+  <div id="app" class="app-surface">
+    <main id="app-main"></main>
+    <nav id="bottomNav" class="bottom-nav" role="navigation">
+      <a href="#home"      class="nav-item" data-i18n="home.title">     <span class="nav-icon">☀️</span><span class="nav-label">Home</span></a>
+      <a href="#scan"       class="nav-item" data-i18n="scan.title">      <span class="nav-icon">📷</span><span class="nav-label">Scan</span></a>
+      <a href="#symptoms"   class="nav-item" data-i18n="symptoms.title"> <span class="nav-icon">🔍</span><span class="nav-label">Symptoms</span></a>
+      <a href="#fields"     class="nav-item" data-i18n="fields.title">    <span class="nav-icon">🌾</span><span class="nav-label">Fields</span></a>
+      <a href="#alerts"     class="nav-item" data-i18n="alerts.title">    <span class="nav-icon">🔔</span><span class="nav-label">Alerts</span></a>
+      <a href="#settings"   class="nav-item" data-i18n="settings.title">  <span class="nav-icon">⚙️</span><span class="nav-label">Settings</span></a>
+    </nav>
+  </div>
+  <script type="module" src="app.js" defer></script>
+</body>
+</html>
