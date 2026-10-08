@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  KisanAI — network_security_config.xml (template).
+  Copy into android/app/src/main/res/xml/ after `npx cap add android`.
+
+  Production policy: block ALL cleartext (HTTP) traffic. Only your production
+  API host is trusted over HTTPS. The dev live-reload URL
+  (http://10.0.2.2:8080) is intentionally NOT whitelisted here — use the baked
+  HTTPS config from scripts/gen-config.js (`npm run gen:config`) for prod.
+-->
+<network-security-config>
+  <base-config cleartextTrafficPermitted="false">
+    <trust-anchors>
+      <certificates src="system" />
+    </trust-anchors>
+  </base-config>
+
+  <domain-config cleartextTrafficPermitted="false">
+    <domain includeSubdomains="true">api.kisanai.example.com</domain>
+  </domain-config>
+</network-security-config>
