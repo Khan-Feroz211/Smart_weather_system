@@ -24,3 +24,19 @@ torch==2.14.0
 torchvision==0.29.0
 Pillow>=10.0.0
 opencv-python-headless>=4.8.0
+
+# --- VPM multi-source integration (installed versions / latest stable checked) ---
+pyyaml==6.0.3
+pyarrow==26.0.0
+pytest-cov==7.1.0
+xarray==2026.9.0
+netCDF4==1.7.4
+loguru==0.7.3
+earthengine-api==1.7.48
+geemap==0.37.2
+rioxarray==0.19.0
+# Optional extras (not required; versions unpinned on purpose):
+# himawari-downloader
+# ftp-himawari8-hsd
+# earthaccess
+# boto3

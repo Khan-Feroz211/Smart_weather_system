@@ -1,0 +1,64 @@
+# Dataset registry for VPM loaders. ${VAR} values are expanded from the environment.
+# NOTE: no pre-existing HLS/ERA5 loader config was found in the repo; hls and era5_land
+# entries below are descriptive only (Phase 1 does not wrap existing code).
+datasets:
+  hls:
+    enabled: true
+    phase: 1
+    asset: NASA/HLS/HLSS30/v2
+  sentinel1:
+    enabled: true
+    phase: 2
+    asset: COPERNICUS/S1_GRD
+    instrument_mode: IW
+    polarizations: [VV, VH]
+    speckle_radius_m: 30   # focal median radius, metres
+  modis_lst:
+    enabled: true
+    phase: 1
+    asset: MODIS/061/MOD11A1
+    bands: [LST_Day_1km, LST_Night_1km, QC_Day, QC_Night]
+    scale: 0.02            # K
+  modis_vi:
+    enabled: true
+    phase: 3
+    asset: MODIS/061/MOD13Q1
+    bands: [NDVI, EVI, DetailedQA]
+    scale: 0.0001
+  smap:
+    enabled: true
+    phase: 1
+    asset: NASA/SMAP/SPL4SMGP/008
+    bands: [sm_surface, sm_rootzone]
+  viirs_vi:
+    enabled: true
+    phase: 3
+    asset: NOAA/VIIRS/001/VNP13A1
+    bands: [NDVI, EVI2]
+    scale: 0.0001
+  era5_land:
+    enabled: true
+    phase: 1
+    asset: ECMWF/ERA5_LAND/HOURLY
+  himawari:
+    enabled: false
+    phase: 1
+    host: ftp.ptree.jaxa.jp
+    username: ${JAXA_USER}
+    password: ${JAXA_PASS}
+    products: [PAR, SW, AOT]
+    cadence_min: 10
+    retention_days: 30
+  openmeteo_radiation:
+    enabled: false
+    phase: 4
+    url: https://satellite-api.open-meteo.com/v1/archive
+
+# --- Track B additions (live mode + VPM) ---
+live:
+  window_days: 30
+  refresh_hours: 6
+vpm:
+  temp_source: era5        # era5 | lst
+  w_scalar_mode: lswi      # lswi | blended
+  alpha: 0.5               # blend weight of W_LSWI in 'blended' mode

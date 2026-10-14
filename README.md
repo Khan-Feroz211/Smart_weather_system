@@ -2665,3 +2665,52 @@ This project demonstrates:
 ---
 
 **Built with ❤️ for Farmers of Pakistan.
+
+
+---
+
+## Multi-Source Satellite Data, Live Mode and VPM
+
+Loaders live in `data_loaders/` (config in `config/datasets.yaml`, `${VAR}` values expanded from the environment). Google Earth Engine (GEE) loaders return `ee.ImageCollection`; Himawari and Open-Meteo return pandas DataFrames.
+
+| Name | Asset / source | Cadence | Resolution | Purpose |
+|---|---|---|---|---|
+| HLS | `NASA/HLS/HLSS30/v2` | ~2-3 days | 30 m | EVI / LSWI for FPAR and W_scalar |
+| Sentinel-1 | `COPERNICUS/S1_GRD` | 6-12 days | 10 m | VV/VH backscatter (cloud-free structure) |
+| MODIS LST | `MODIS/061/MOD11A1` | daily | 1 km | Land surface temperature for T_scalar |
+| MODIS VI | `MODIS/061/MOD13Q1` | 16 days | 250 m | NDVI / EVI |
+| SMAP | `NASA/SMAP/SPL4SMGP/008` | 3-hourly | 11 km | Surface / root-zone soil moisture |
+| VIIRS VI | `NOAA/VIIRS/001/VNP13A1` | 16 days | 500 m | NDVI / EVI2 |
+| ERA5-Land | `ECMWF/ERA5_LAND/HOURLY` | hourly | ~11 km | Air temperature, precipitation, soil water, radiation |
+| Himawari P-Tree | JAXA FTP `ftp.ptree.jaxa.jp` | 10 min (30-day retention) | 5 km | PAR / shortwave / AOT (Asia-Pacific) |
+| Open-Meteo radiation | `satellite-api.open-meteo.com/v1/archive` | hourly or native | ~5 km | Shortwave radiation, PAR proxy, sanity check |
+
+### Credentials
+- Earth Engine: register at https://earthengine.google.com/, then either run `earthengine authenticate` or set `EE_SERVICE_ACCOUNT`, `EE_PRIVATE_KEY_FILE` and `EE_PROJECT` (service account).
+- JAXA P-Tree: register at https://www.eorc.jaxa.jp/ptree/registration_top.html and set `JAXA_USER` / `JAXA_PASS` in `.env` (aliases `PTREE_USER` / `PTREE_PASSWORD`). Without them Himawari returns an empty DataFrame with a warning.
+- Never commit `.env`; `.env.example` lists key names only.
+
+### Usage
+```python
+from data_loaders import sentinel1, himawari, openmeteo_radiation
+from data_loaders.live import LiveMonitor
+import vpm
+
+df = himawari.fetch(31.5, 74.3, "2025-06-01", "2025-06-10", "PAR")       # DataFrame
+om = openmeteo_radiation.fetch(31.5, 74.3, "2025-06-01", "2025-06-10")   # SW_down, PAR_proxy
+LiveMonitor(31.5, 74.3, interval_hours=6, callback=print).run_once()      # last 30 days
+cfg = vpm.VPMConfig.from_yaml()      # defaults: ERA5 air temp + LSWI-only W_scalar
+ts = vpm.t_scalar(22.0, cfg.t_min, cfg.t_opt, cfg.t_max)
+```
+Feature stack: `data_loaders.feature_stack.build_feature_stack(aoi, start, end, mode="historical" | "live")`. Live CLI: `python -m data_loaders.live --lat 31.5 --lon 74.3 --once`.
+
+VPM options in `config/datasets.yaml` (`vpm:`): `temp_source: era5|lst`, `w_scalar_mode: lswi|blended`, `alpha`. Parameter values (Tmin/Topt/Tmax, soil-moisture limits, eps_0) are documented assumptions in `vpm.py`.
+
+### Running the new tests
+```bash
+python -m pytest tests/test_himawari.py tests/test_openmeteo.py tests/test_live.py tests/test_vpm.py tests/test_citations.py tests/test_data_loaders.py -q
+```
+Warning: the full `tests/` suite is slow (many minutes); run it only deliberately. The new tests use mocks and need no network.
+
+### Data attribution
+See `CITATIONS.md` and `data_loaders/citations.py` (`get_citations`, `attribution_header`).
