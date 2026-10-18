@@ -3,6 +3,18 @@
 {% block title %}Dashboard - Smart Weather System{% endblock %}
 
 {% block content %}
+{% if mfa_clock_drift_notice %}
+  <div class="alert alert-warning alert-dismissible fade show card-futuristic mb-4" role="alert">
+    <div class="d-flex align-items-center">
+      <i class="fas fa-clock me-2 fs-5"></i>
+      <span class="flex-grow-1">
+        Your authenticator app's clock looks slightly out of sync. Your codes still
+        work, but please enable automatic time sync on your device.
+      </span>
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Dismiss"></button>
+    </div>
+  </div>
+{% endif %}
 <div class="dashboard-v2">
 
   <!-- ================================================================

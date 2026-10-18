@@ -1,0 +1,14 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    ".env.example missing the newly required variables - the app now refuses to start outside DEBUG without MFA_ENCRYPTION_KEY and MFA_IP_PEPPER, but neither is documented in .env.example. Add both with a generation command and the comma-separated rotation format. (confirmed, non-blocking)",
+    "Startup strictness keyed on DEBUG only - tests/test_agri_advisor_v6.py, tests/test_backend_gaps_and_sockets.py and tests/test_disease_detection_dl.py import app_clean and set no DEBUG, so a clean checkout or CI run without .env fails at import with MfaConfigError. Set DEBUG=True (or the two MFA vars) explicitly in those modules or tests/conftest.py. (confirmed, non-blocking)",
+    "Postgres DDL never executed - section 10, including the DO $$ ... FOREACH ... EXECUTE format('REVOKE ALL ...') block, is inspection-only. Run psql -f supabase/schema.sql against staging before deploy; ALTER TABLE and REVOKE require the connecting role to own the tables. (confirmed)",
+    "370 lines of db.py SQL unproven - uuid casts, %s::jsonb, ON CONFLICT ... RETURNING and rowcount paths have only been imported, never run. Cover them with an integration test in Phase 2 before any route depends on them. (confirmed)",
+    "Status/state strings unvalidated in the accessors - mfa_outbox_mark_sent, mfa_challenge_insert and mfa_reset_request_set_status pass caller strings straight through and rely on the DB CHECK to reject typos at runtime. Validate against a module-level tuple of allowed values. (confirmed, minor)",
+    "Encoding asymmetry in the rotation path - decrypts_with_primary encodes with errors=\"ignore\" while decrypt_secret uses errors=\"strict\", so a non-ASCII stored value surfaces as an uncaught UnicodeEncodeError instead of the clean RotationError. Use strict encoding in both and treat failure as 'not primary'. (likely, minor)",
+    "Test-only SQLite DDL can drift from section 10 - MFA_SQLITE_DDL in tests/test_mfa_schema_sqlite.py is a hand translation with nothing checking it stays in step with supabase/schema.sql. Add an assertion over table/index names parsed from the real schema file. (confirmed, minor)",
+    "rotate_mfa_key.main() DB path untested - only --help, the single-key refusal and the pure rotate_rows core are covered; the db.transaction() wrapper and the dry-run conn.rollback() inside a context manager that then commits are unexercised. Exercise main() once a DB is reachable. (confirmed, minor)"
+  ],
+  "reviewDoc": "d:\\SWS\\Smart_weather_system\\.agents\\tasks\\mfa-phase1-review.md"
+}

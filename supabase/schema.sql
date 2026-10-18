@@ -630,3 +630,208 @@ BEGIN
         CREATE INDEX users_totp_secret_idx ON public.users (id) WHERE totp_secret IS NOT NULL;
     END IF;
 END $$;
+
+-- -----------------------------------------------------------------------------
+-- 10. MFA / 2FA (Phase 1: schema only -- no app code reads these yet)
+-- -----------------------------------------------------------------------------
+-- Additive only.  public.users.totp_secret (section 2 / 9a) is NOT touched here:
+-- it stays the live store for the current TOTP flow and becomes a migration
+-- source for a later phase.  Nothing in these tables is read or written by a
+-- route yet; db.py gained accessors (section "10. MFA (Phase 1) accessors") that
+-- a later phase will call.
+--
+-- Deliberately BACKEND-ONLY: no RLS policy and no GRANT is declared for any
+-- mfa_* / trusted_devices table, so anon and authenticated keep the blanket
+-- REVOKE from section 9 and can never reach second-factor material through the
+-- Supabase REST API.  This is stricter on purpose than section 9's
+-- `authenticated` read policies.  RLS is still enabled on each table so a future
+-- accidental GRANT cannot open them up.
+--
+-- Secrets: secret_encrypted columns hold Fernet/MultiFernet ciphertext produced
+-- by mfa_crypto.encrypt_secret(); plaintext TOTP secrets are never stored here.
+-- Tokens and recovery codes are stored only as hashes.  IP addresses are stored
+-- only as HMAC-SHA256 hashes (mfa_crypto.ip_hash, keyed by MFA_IP_PEPPER).
+
+CREATE TABLE IF NOT EXISTS public.mfa_factors (
+    id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id           uuid NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
+    type              text NOT NULL CHECK (type IN ('totp', 'webauthn', 'recovery')),
+    secret_encrypted  text,                               -- TOTP: Fernet ciphertext, never plaintext
+    label             text NOT NULL DEFAULT '',           -- user-visible device name
+    credential_id     text,                               -- WebAuthn credential id (base64url)
+    public_key        text,                               -- WebAuthn COSE public key (base64url)
+    sign_count        bigint NOT NULL DEFAULT 0,          -- WebAuthn signature counter
+    transports        text,                               -- WebAuthn transports, comma separated
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    last_used_at      timestamptz,
+    disabled_at       timestamptz,                        -- soft delete: NULL means active
+    UNIQUE (user_id, type, label)
+);
+COMMENT ON TABLE public.mfa_factors IS
+    'Second-factor enrolments. One row per factor; disabled_at IS NULL means active.';
+COMMENT ON COLUMN public.mfa_factors.secret_encrypted IS
+    'Fernet (MultiFernet) ciphertext of the TOTP shared secret. NEVER plaintext.';
+
+CREATE INDEX IF NOT EXISTS mfa_factors_user_id_idx    ON public.mfa_factors (user_id);
+CREATE INDEX IF NOT EXISTS mfa_factors_user_type_idx  ON public.mfa_factors (user_id, type) WHERE disabled_at IS NULL;
+CREATE INDEX IF NOT EXISTS mfa_factors_created_at_idx ON public.mfa_factors (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.mfa_recovery_codes (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    uuid NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
+    code_hash  text NOT NULL,
+    used_at    timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+COMMENT ON COLUMN public.mfa_recovery_codes.code_hash IS
+    'Argon2id hash (argon2-cffi PasswordHasher) of a single-use recovery code. NEVER plain text.';
+
+CREATE INDEX IF NOT EXISTS mfa_recovery_codes_user_id_idx    ON public.mfa_recovery_codes (user_id);
+CREATE INDEX IF NOT EXISTS mfa_recovery_codes_unused_idx     ON public.mfa_recovery_codes (user_id) WHERE used_at IS NULL;
+CREATE INDEX IF NOT EXISTS mfa_recovery_codes_created_at_idx ON public.mfa_recovery_codes (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.mfa_used_totp_steps (
+    user_id   uuid REFERENCES public.users (id) ON DELETE CASCADE,
+    factor_id uuid NOT NULL REFERENCES public.mfa_factors (id) ON DELETE CASCADE,
+    time_step bigint NOT NULL,
+    used_at   timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (factor_id, time_step)
+);
+COMMENT ON TABLE public.mfa_used_totp_steps IS
+    'Replay guard: one row per (factor, TOTP time step) already accepted. The INSERT is the lock -- a conflict means replay.';
+
+CREATE INDEX IF NOT EXISTS mfa_used_totp_steps_user_id_idx ON public.mfa_used_totp_steps (user_id);
+CREATE INDEX IF NOT EXISTS mfa_used_totp_steps_used_at_idx ON public.mfa_used_totp_steps (used_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.mfa_attempts (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id      uuid REFERENCES public.users (id) ON DELETE CASCADE,   -- NULL when the account is unknown
+    ip_hash      text,                                                  -- HMAC-SHA256(ip, MFA_IP_PEPPER); never a raw IP
+    attempt_type text NOT NULL CHECK (attempt_type IN ('password', 'totp', 'recovery', 'webauthn', 'reset')),
+    success      boolean NOT NULL,
+    created_at   timestamptz NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE public.mfa_attempts IS
+    'Authoritative, DB-backed attempt counter for lockout (replaces the per-process in-memory limiter in a later phase).';
+
+CREATE INDEX IF NOT EXISTS mfa_attempts_user_created_idx ON public.mfa_attempts (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS mfa_attempts_ip_created_idx   ON public.mfa_attempts (ip_hash, created_at DESC);
+CREATE INDEX IF NOT EXISTS mfa_attempts_created_at_idx   ON public.mfa_attempts (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.mfa_events (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_type      text NOT NULL,
+    actor           text,            -- free-form reference: 'user:<uuid>', 'admin:<uuid>', 'system'
+    user_id         uuid REFERENCES public.users (id) ON DELETE SET NULL,
+    ip_hash         text,            -- HMAC-SHA256; never a raw IP
+    user_agent_hash text,            -- HMAC-SHA256; never a raw User-Agent
+    created_at      timestamptz NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE public.mfa_events IS
+    'APPEND-ONLY MFA audit log. Application code issues INSERT and SELECT only -- no UPDATE and no DELETE, '
+    'except a retention/pruning job added in a later phase. db.py deliberately ships no update/delete helper. '
+    'Never contains a secret, code, token, raw IP or raw User-Agent.';
+COMMENT ON COLUMN public.mfa_events.actor IS
+    'Text actor reference rather than an FK so the audit trail survives user deletion.';
+
+CREATE INDEX IF NOT EXISTS mfa_events_user_id_idx    ON public.mfa_events (user_id);
+CREATE INDEX IF NOT EXISTS mfa_events_created_at_idx ON public.mfa_events (created_at DESC);
+CREATE INDEX IF NOT EXISTS mfa_events_type_idx       ON public.mfa_events (event_type, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.trusted_devices (
+    id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id        uuid NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
+    token_hash     text NOT NULL,   -- SHA-256 of the remember-device cookie; the token itself is never stored
+    ua_family      text,            -- coarse UA family only (e.g. 'Chrome'), not the full User-Agent
+    ip_prefix_hash text,            -- HMAC of the /24 or /48 prefix; never a full raw IP
+    device_label   text,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    expires_at     timestamptz NOT NULL,
+    revoked_at     timestamptz
+);
+COMMENT ON TABLE public.trusted_devices IS
+    'Remember-this-device records. Valid when revoked_at IS NULL AND expires_at > now().';
+
+CREATE INDEX IF NOT EXISTS trusted_devices_user_id_idx    ON public.trusted_devices (user_id);
+CREATE INDEX IF NOT EXISTS trusted_devices_token_hash_idx ON public.trusted_devices (token_hash);
+CREATE INDEX IF NOT EXISTS trusted_devices_expires_at_idx ON public.trusted_devices (expires_at);
+CREATE INDEX IF NOT EXISTS trusted_devices_created_at_idx ON public.trusted_devices (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.mfa_login_challenges (
+    challenge_id text PRIMARY KEY,   -- random 256-bit value (hex) minted by the application
+    user_id      uuid NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
+    state        text NOT NULL DEFAULT 'pending'
+                 CHECK (state IN ('pending', 'verified', 'expired', 'failed')),
+    attempts     integer NOT NULL DEFAULT 0,
+    expires_at   timestamptz NOT NULL,
+    created_at   timestamptz NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE public.mfa_login_challenges IS
+    'Server-side half-authenticated login state, replacing the cookie-only pending_2fa dict in a later phase.';
+
+CREATE INDEX IF NOT EXISTS mfa_login_challenges_user_id_idx    ON public.mfa_login_challenges (user_id);
+CREATE INDEX IF NOT EXISTS mfa_login_challenges_expires_at_idx ON public.mfa_login_challenges (expires_at);
+CREATE INDEX IF NOT EXISTS mfa_login_challenges_created_at_idx ON public.mfa_login_challenges (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.mfa_pending_enrollments (
+    id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id          uuid NOT NULL UNIQUE REFERENCES public.users (id) ON DELETE CASCADE,
+    secret_encrypted text NOT NULL,   -- Fernet ciphertext; replaces the secret currently held in the session cookie
+    created_at       timestamptz NOT NULL DEFAULT now(),
+    expires_at       timestamptz NOT NULL
+);
+COMMENT ON TABLE public.mfa_pending_enrollments IS
+    'At most one in-flight TOTP enrolment per user (UNIQUE user_id); the candidate secret lives here, not in the cookie.';
+
+CREATE INDEX IF NOT EXISTS mfa_pending_enrollments_expires_at_idx ON public.mfa_pending_enrollments (expires_at);
+CREATE INDEX IF NOT EXISTS mfa_pending_enrollments_created_at_idx ON public.mfa_pending_enrollments (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.mfa_outbox (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    uuid REFERENCES public.users (id) ON DELETE CASCADE,
+    kind       text NOT NULL,     -- e.g. 'lost_device_request'
+    payload    jsonb,             -- no secret, code or token is ever placed here
+    status     text NOT NULL DEFAULT 'pending'
+               CHECK (status IN ('pending', 'sent', 'failed', 'cancelled')),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    sent_at    timestamptz
+);
+COMMENT ON TABLE public.mfa_outbox IS
+    'Durable queue for lost-device / support requests raised while the device or network is offline. '
+    'TODO(mfa): payload shape is not yet specified -- see docs/mfa_threat_model.md.';
+
+CREATE INDEX IF NOT EXISTS mfa_outbox_user_id_idx    ON public.mfa_outbox (user_id);
+CREATE INDEX IF NOT EXISTS mfa_outbox_pending_idx    ON public.mfa_outbox (created_at) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS mfa_outbox_created_at_idx ON public.mfa_outbox (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.mfa_reset_requests (
+    id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id            uuid NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
+    cancel_token_hash  text NOT NULL,   -- hash only; the emailed/sent token is never stored
+    confirm_token_hash text NOT NULL,
+    requested_at       timestamptz NOT NULL DEFAULT now(),
+    eligible_at        timestamptz NOT NULL,   -- delay window: reset cannot complete before this
+    status             text NOT NULL DEFAULT 'pending'
+                       CHECK (status IN ('pending', 'cancelled', 'completed', 'expired')),
+    used_at            timestamptz
+);
+COMMENT ON TABLE public.mfa_reset_requests IS
+    'Delayed, cancellable second-factor reset. The delay plus the cancel token give the real owner time to object.';
+
+CREATE INDEX IF NOT EXISTS mfa_reset_requests_user_id_idx     ON public.mfa_reset_requests (user_id);
+CREATE INDEX IF NOT EXISTS mfa_reset_requests_pending_idx     ON public.mfa_reset_requests (user_id, eligible_at) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS mfa_reset_requests_requested_at_idx ON public.mfa_reset_requests (requested_at DESC);
+
+-- RLS on, no policies, no grants: backend-owner access only (see the note above).
+DO $$
+DECLARE t text;
+BEGIN
+    FOREACH t IN ARRAY ARRAY[
+        'mfa_factors','mfa_recovery_codes','mfa_used_totp_steps','mfa_attempts',
+        'mfa_events','trusted_devices','mfa_login_challenges',
+        'mfa_pending_enrollments','mfa_outbox','mfa_reset_requests']
+    LOOP
+        EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
+        EXECUTE format('REVOKE ALL ON public.%I FROM anon, authenticated', t);
+    END LOOP;
+END $$;

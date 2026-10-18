@@ -70,7 +70,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'smart_weather_ai_2024')
+# Session signing key. resolve_secret_key() refuses a missing/short/well-known
+# key: in DEBUG it falls back to a random per-process key (sessions reset on
+# restart), otherwise it raises. Never fall back to a hardcoded constant -- a
+# guessable key lets anyone forge a session cookie and bypass password + 2FA.
+# See docs/mfa_threat_model.md (audit finding C1).
+import auth  # noqa: E402  (imported here so the secret key is set before use)
+app.secret_key = auth.resolve_secret_key()
 app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024  # 2 MB upload limit for disease image uploads
 socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="*")
 
@@ -88,6 +94,14 @@ import auth
 import admin_routes
 auth.init_app(app)
 app.register_blueprint(admin_routes.admin_bp)
+
+# MFA configuration guard (Phase 1, additive).
+# Strict only when DEBUG / FLASK_DEBUG is falsey: with DEBUG=False the app now
+# refuses to start unless MFA_ENCRYPTION_KEY, MFA_IP_PEPPER and a strong
+# SECRET_KEY are set. DEBUG=True local runs only get a warning, so existing
+# behaviour and the test suite are unchanged.
+import mfa_crypto
+mfa_crypto.validate_mfa_config()
 
 # Configuration
 OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY', 'demo_key')

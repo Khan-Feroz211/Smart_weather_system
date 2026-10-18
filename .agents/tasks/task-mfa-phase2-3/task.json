@@ -1,0 +1,7 @@
+{
+  "task_id": "task-mfa-phase2-3",
+  "task_description": "Implement MFA Phase 2 (TOTP verification with atomic replay protection in totp_auth.py, plus clock-drift detection) and Phase 3 (new mfa_rate_limit.py backed by the mfa_attempts table: per-account lockout with doubling and cap, per-IP slowdown with no hard block, wired into /2fa/verify, /2fa/setup, /2fa/disable, and the login counter reset deferred until after MFA succeeds) in the existing Flask app at d:\\SWS\\Smart_weather_system. Additive and surgical; users.totp_secret is NOT migrated; nothing is committed. The authoritative plan is .agents/tasks/mfa-phase2-3-plan.md (decisions D1-D8).",
+  "status": "pending",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}

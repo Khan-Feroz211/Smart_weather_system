@@ -466,3 +466,443 @@ def query_df(sql, params=None):
         cur = conn.execute(sql, params)
         cols = [d[0] for d in cur.description]
         return pd.DataFrame([tuple(r) for r in cur.fetchall()], columns=cols)
+
+
+# --------------------------------------------------------------------------
+# 10. MFA (Phase 1) accessors
+# --------------------------------------------------------------------------
+# Thin accessors for the mfa_* / trusted_devices tables defined in
+# supabase/schema.sql section 10.  Phase 1 additions: NO route calls these yet.
+# They raise DatabaseUnavailable like everything else in this module, use %s
+# placeholders, and no function here logs, prints or returns its arguments --
+# the values passed in are secrets, hashes or tokens.
+#
+# public.users.totp_secret is deliberately untouched by all of these: it remains
+# the live store for the current TOTP flow and the migration source for a later
+# phase.
+#
+# mfa_events is APPEND-ONLY: only mfa_log_event (INSERT) and mfa_recent_events
+# (SELECT) exist on purpose.  No update/delete helper is provided; a retention
+# job in a later phase is the only thing allowed to delete.
+# --------------------------------------------------------------------------
+
+def mfa_insert_factor(user_id, factor_type, secret_encrypted=None, label="",
+                      credential_id=None, public_key=None, transports=None):
+    """Insert a second-factor row and return its id (text). Never logs its arguments."""
+    with transaction() as conn:
+        row = conn.execute(
+            "INSERT INTO mfa_factors (user_id, type, secret_encrypted, label, "
+            "credential_id, public_key, transports) "
+            "VALUES (%s::uuid, %s, %s, %s, %s, %s, %s) RETURNING id::text",
+            (user_id, factor_type, secret_encrypted, label or "",
+             credential_id, public_key, transports),
+        ).fetchone()
+        return row[0] if row else None
+
+
+def mfa_get_factors(user_id, include_disabled=False):
+    """Return the user's factor rows (active only by default). Never logs its arguments."""
+    sql = ("SELECT id::text AS id, user_id::text AS user_id, type, secret_encrypted, label, "
+           "credential_id, public_key, sign_count, transports, created_at, last_used_at, "
+           "disabled_at FROM mfa_factors WHERE user_id = %s::uuid")
+    if not include_disabled:
+        sql += " AND disabled_at IS NULL"
+    sql += " ORDER BY created_at"
+    with connect() as conn:
+        return conn.execute(sql, (user_id,)).fetchall()
+
+
+def mfa_disable_factor(factor_id, user_id=None):
+    """Soft-delete a factor (sets disabled_at). Returns the number of rows changed."""
+    sql = "UPDATE mfa_factors SET disabled_at = now() WHERE id = %s::uuid AND disabled_at IS NULL"
+    params = [factor_id]
+    if user_id is not None:
+        sql += " AND user_id = %s::uuid"
+        params.append(user_id)
+    with transaction() as conn:
+        return conn.execute(sql, tuple(params)).rowcount
+
+
+def mfa_touch_factor_last_used(factor_id):
+    """Stamp last_used_at on a factor. Returns the number of rows changed."""
+    with transaction() as conn:
+        return conn.execute(
+            "UPDATE mfa_factors SET last_used_at = now() WHERE id = %s::uuid",
+            (factor_id,),
+        ).rowcount
+
+
+def mfa_insert_recovery_codes(user_id, code_hashes):
+    """Store Argon2id hashes of freshly issued recovery codes.
+
+    `code_hashes` must already be hashes -- plain codes are never accepted,
+    stored or logged. Returns the number of rows inserted.
+    """
+    hashes = [h for h in (code_hashes or []) if h]
+    if not hashes:
+        return 0
+    with transaction() as conn:
+        for code_hash in hashes:
+            conn.execute(
+                "INSERT INTO mfa_recovery_codes (user_id, code_hash) VALUES (%s::uuid, %s)",
+                (user_id, code_hash),
+            )
+        return len(hashes)
+
+
+def mfa_get_unused_recovery_codes(user_id):
+    """Return the user's unused recovery-code rows (id + hash). Never logs its arguments."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT id::text AS id, code_hash, created_at FROM mfa_recovery_codes "
+            "WHERE user_id = %s::uuid AND used_at IS NULL ORDER BY created_at",
+            (user_id,),
+        ).fetchall()
+
+
+def mfa_mark_recovery_code_used(code_id):
+    """Burn a recovery code. Returns 1 when it was still unused, 0 otherwise (single-use guard)."""
+    with transaction() as conn:
+        return conn.execute(
+            "UPDATE mfa_recovery_codes SET used_at = now() WHERE id = %s::uuid AND used_at IS NULL",
+            (code_id,),
+        ).rowcount
+
+
+def mfa_try_consume_totp_step(factor_id, time_step, user_id=None):
+    """Replay primitive: claim a (factor, time_step) pair.
+
+    Returns True when the step was newly recorded (code accepted) and False when
+    it had already been used (replay). The INSERT ... ON CONFLICT DO NOTHING is
+    the lock, so two concurrent verifications cannot both win.
+
+    TODO(mfa): rows in mfa_used_totp_steps are never pruned -- only the last
+    ~90 s of steps can still be replayed, so everything older is dead weight.
+    A retention job belongs to a later phase; see docs/mfa_threat_model.md.
+    """
+    with transaction() as conn:
+        row = conn.execute(
+            "INSERT INTO mfa_used_totp_steps (user_id, factor_id, time_step) "
+            "VALUES (%s::uuid, %s::uuid, %s) ON CONFLICT (factor_id, time_step) DO NOTHING "
+            "RETURNING time_step",
+            (user_id, factor_id, int(time_step)),
+        ).fetchone()
+        return row is not None
+
+
+def mfa_get_or_create_totp_factor_id(user_id, label="legacy:users.totp_secret"):
+    """Return the id (text) of the user's TOTP replay *anchor* factor, creating it once.
+
+    This is replay bookkeeping, NOT a secret store and NOT a migration:
+    `secret_encrypted` is deliberately left NULL and public.users.totp_secret
+    remains the one and only live secret store.  The anchor exists because
+    mfa_used_totp_steps.factor_id is NOT NULL REFERENCES mfa_factors (id), so a
+    synthetic id cannot be used.  UNIQUE (user_id, type, label) makes the
+    INSERT ... ON CONFLICT DO NOTHING + SELECT pair idempotent and race-safe.
+
+    Never logs its arguments.
+    """
+    with transaction() as conn:
+        conn.execute(
+            "INSERT INTO mfa_factors (user_id, type, label) VALUES (%s::uuid, %s, %s) "
+            "ON CONFLICT (user_id, type, label) DO NOTHING",
+            (user_id, "totp", label),
+        )
+        row = conn.execute(
+            "SELECT id::text AS id FROM mfa_factors "
+            "WHERE user_id = %s::uuid AND type = %s AND label = %s",
+            (user_id, "totp", label),
+        ).fetchone()
+        return row[0] if row else None
+
+
+def mfa_record_attempt(attempt_type, success, user_id=None, ip_hash=None):
+    """Append an attempt row. `ip_hash` must already be hashed -- never a raw IP.
+
+    TODO(mfa): mfa_attempts has no retention and an unauthenticated writer --
+    every failed /login inserts a row and the login limiter is keyed on
+    ip|email, so varying the email makes the insert rate effectively unbounded.
+    Only the last MFA_WINDOW_MINUTES (plus the lockout tail) is ever read, so
+    everything older is dead weight: a retention job belongs with the
+    mfa_used_totp_steps one in a later phase.  See docs/mfa_threat_model.md.
+    """
+    with transaction() as conn:
+        conn.execute(
+            "INSERT INTO mfa_attempts (user_id, ip_hash, attempt_type, success) "
+            "VALUES (%s::uuid, %s, %s, %s)",
+            (user_id, ip_hash, attempt_type, bool(success)),
+        )
+
+
+def mfa_count_recent_attempts(since, user_id=None, ip_hash=None, attempt_type=None,
+                              success=None):
+    """Count attempts since `since` (datetime/ISO string), filtered by whatever is given."""
+    sql = "SELECT count(*) FROM mfa_attempts WHERE created_at >= %s"
+    params = [as_utc(since)]
+    if user_id is not None:
+        sql += " AND user_id = %s::uuid"
+        params.append(user_id)
+    if ip_hash is not None:
+        sql += " AND ip_hash = %s"
+        params.append(ip_hash)
+    if attempt_type is not None:
+        sql += " AND attempt_type = %s"
+        params.append(attempt_type)
+    if success is not None:
+        sql += " AND success = %s"
+        params.append(bool(success))
+    with connect() as conn:
+        row = conn.execute(sql, tuple(params)).fetchone()
+        return int(row[0]) if row else 0
+
+
+def mfa_recent_attempts(since, user_id=None, ip_hash=None, limit=200):
+    """Return attempt rows since `since` (datetime/ISO string), newest first.
+
+    Companion to mfa_count_recent_attempts for callers that need the ordering
+    and the success flags, not just a total.  `ip_hash` is already hashed --
+    never a raw IP.  Never logs its arguments.
+    """
+    sql = "SELECT attempt_type, success, created_at FROM mfa_attempts WHERE created_at >= %s"
+    params = [as_utc(since)]
+    if user_id is not None:
+        sql += " AND user_id = %s::uuid"
+        params.append(user_id)
+    if ip_hash is not None:
+        sql += " AND ip_hash = %s"
+        params.append(ip_hash)
+    sql += " ORDER BY created_at DESC LIMIT %s"
+    params.append(int(limit))
+    with connect() as conn:
+        return conn.execute(sql, tuple(params)).fetchall()
+
+
+def mfa_log_event(event_type, actor=None, user_id=None, ip_hash=None, user_agent_hash=None):
+    """Append one row to the APPEND-ONLY mfa_events audit log.
+
+    Callers must pass hashes, never a raw IP or User-Agent, and never a secret,
+    code or token. There is deliberately no update/delete counterpart.
+    """
+    with transaction() as conn:
+        conn.execute(
+            "INSERT INTO mfa_events (event_type, actor, user_id, ip_hash, user_agent_hash) "
+            "VALUES (%s, %s, %s::uuid, %s, %s)",
+            (event_type, actor, user_id, ip_hash, user_agent_hash),
+        )
+
+
+def mfa_recent_events(user_id=None, limit=100, event_type=None):
+    """Read back the audit log (SELECT only). Never logs its arguments.
+
+    `event_type` filters in SQL so a caller after one kind of event (the lockout
+    counter, for instance) is not starved by the busier event types sharing the
+    same `limit`.
+    """
+    sql = ("SELECT id::text AS id, event_type, actor, user_id::text AS user_id, ip_hash, "
+           "user_agent_hash, created_at FROM mfa_events")
+    clauses = []
+    params = []
+    if user_id is not None:
+        clauses.append("user_id = %s::uuid")
+        params.append(user_id)
+    if event_type is not None:
+        clauses.append("event_type = %s")
+        params.append(event_type)
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY created_at DESC LIMIT %s"
+    params.append(int(limit))
+    with connect() as conn:
+        return conn.execute(sql, tuple(params)).fetchall()
+
+
+def trusted_device_insert(user_id, token_hash, expires_at, ua_family=None,
+                          ip_prefix_hash=None, device_label=None):
+    """Store a remember-this-device record. `token_hash` is a hash, never the token."""
+    with transaction() as conn:
+        row = conn.execute(
+            "INSERT INTO trusted_devices (user_id, token_hash, ua_family, ip_prefix_hash, "
+            "device_label, expires_at) VALUES (%s::uuid, %s, %s, %s, %s, %s) RETURNING id::text",
+            (user_id, token_hash, ua_family, ip_prefix_hash, device_label, as_utc(expires_at)),
+        ).fetchone()
+        return row[0] if row else None
+
+
+def trusted_device_find_by_token_hash(token_hash):
+    """Return the matching live device row (not revoked, not expired) or None."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT id::text AS id, user_id::text AS user_id, token_hash, ua_family, "
+            "ip_prefix_hash, device_label, created_at, expires_at, revoked_at "
+            "FROM trusted_devices WHERE token_hash = %s AND revoked_at IS NULL "
+            "AND expires_at > now()",
+            (token_hash,),
+        ).fetchone()
+
+
+def trusted_device_revoke(device_id, user_id=None):
+    """Revoke a trusted device. Returns the number of rows changed."""
+    sql = "UPDATE trusted_devices SET revoked_at = now() WHERE id = %s::uuid AND revoked_at IS NULL"
+    params = [device_id]
+    if user_id is not None:
+        sql += " AND user_id = %s::uuid"
+        params.append(user_id)
+    with transaction() as conn:
+        return conn.execute(sql, tuple(params)).rowcount
+
+
+def mfa_challenge_insert(challenge_id, user_id, expires_at, state="pending"):
+    """Create a server-side login challenge. `challenge_id` is app-minted and never logged."""
+    with transaction() as conn:
+        conn.execute(
+            "INSERT INTO mfa_login_challenges (challenge_id, user_id, state, expires_at) "
+            "VALUES (%s, %s::uuid, %s, %s)",
+            (challenge_id, user_id, state, as_utc(expires_at)),
+        )
+        return challenge_id
+
+
+def mfa_challenge_get(challenge_id):
+    """Return the challenge row or None. Never logs its arguments."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT challenge_id, user_id::text AS user_id, state, attempts, expires_at, "
+            "created_at FROM mfa_login_challenges WHERE challenge_id = %s",
+            (challenge_id,),
+        ).fetchone()
+
+
+def mfa_challenge_bump_attempts(challenge_id):
+    """Atomically increment the attempt counter and return the new value (or None)."""
+    with transaction() as conn:
+        row = conn.execute(
+            "UPDATE mfa_login_challenges SET attempts = attempts + 1 "
+            "WHERE challenge_id = %s RETURNING attempts",
+            (challenge_id,),
+        ).fetchone()
+        return int(row[0]) if row else None
+
+
+def mfa_challenge_set_state(challenge_id, state, only_if_pending=True):
+    """Move a challenge to a terminal state. Returns rows changed (0 = already consumed)."""
+    sql = "UPDATE mfa_login_challenges SET state = %s WHERE challenge_id = %s"
+    params = [state, challenge_id]
+    if only_if_pending:
+        sql += " AND state = 'pending'"
+    with transaction() as conn:
+        return conn.execute(sql, tuple(params)).rowcount
+
+
+def mfa_challenge_delete_expired():
+    """Drop expired challenges (housekeeping). Returns the number of rows removed."""
+    with transaction() as conn:
+        return conn.execute(
+            "DELETE FROM mfa_login_challenges WHERE expires_at <= now()"
+        ).rowcount
+
+
+def mfa_pending_enrollment_upsert(user_id, secret_encrypted, expires_at):
+    """Store the single in-flight enrolment secret (ciphertext) for a user.
+
+    UNIQUE (user_id) means a new enrolment replaces any earlier one.
+    `secret_encrypted` must already be mfa_crypto ciphertext; never logged.
+    """
+    with transaction() as conn:
+        conn.execute(
+            "INSERT INTO mfa_pending_enrollments (user_id, secret_encrypted, expires_at) "
+            "VALUES (%s::uuid, %s, %s) ON CONFLICT (user_id) DO UPDATE SET "
+            "secret_encrypted = EXCLUDED.secret_encrypted, expires_at = EXCLUDED.expires_at, "
+            "created_at = now()",
+            (user_id, secret_encrypted, as_utc(expires_at)),
+        )
+
+
+def mfa_pending_enrollment_get(user_id):
+    """Return the user's unexpired pending enrolment row or None. Never logs its arguments."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT id::text AS id, user_id::text AS user_id, secret_encrypted, created_at, "
+            "expires_at FROM mfa_pending_enrollments "
+            "WHERE user_id = %s::uuid AND expires_at > now()",
+            (user_id,),
+        ).fetchone()
+
+
+def mfa_pending_enrollment_delete(user_id):
+    """Drop a pending enrolment (completed or abandoned). Returns rows removed."""
+    with transaction() as conn:
+        return conn.execute(
+            "DELETE FROM mfa_pending_enrollments WHERE user_id = %s::uuid",
+            (user_id,),
+        ).rowcount
+
+
+def mfa_outbox_enqueue(kind, user_id=None, payload=None):
+    """Queue a lost-device / support request for later delivery.
+
+    `payload` is JSON-serialised with safe_json; it must never carry a secret,
+    code or token. Returns the new row id (text).
+    """
+    with transaction() as conn:
+        row = conn.execute(
+            "INSERT INTO mfa_outbox (user_id, kind, payload) "
+            "VALUES (%s::uuid, %s, %s::jsonb) RETURNING id::text",
+            (user_id, kind, safe_json(payload or {})),
+        ).fetchone()
+        return row[0] if row else None
+
+
+def mfa_outbox_claim_pending(limit=20):
+    """Return up to `limit` pending outbox rows, oldest first."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT id::text AS id, user_id::text AS user_id, kind, payload, status, "
+            "created_at, sent_at FROM mfa_outbox WHERE status = 'pending' "
+            "ORDER BY created_at LIMIT %s",
+            (int(limit),),
+        ).fetchall()
+
+
+def mfa_outbox_mark_sent(outbox_id, status="sent"):
+    """Mark an outbox row delivered (or failed/cancelled). Returns rows changed."""
+    with transaction() as conn:
+        return conn.execute(
+            "UPDATE mfa_outbox SET status = %s, sent_at = now() "
+            "WHERE id = %s::uuid AND status = 'pending'",
+            (status, outbox_id),
+        ).rowcount
+
+
+def mfa_reset_request_insert(user_id, cancel_token_hash, confirm_token_hash, eligible_at):
+    """Open a delayed second-factor reset. Both token arguments are hashes, never tokens."""
+    with transaction() as conn:
+        row = conn.execute(
+            "INSERT INTO mfa_reset_requests (user_id, cancel_token_hash, confirm_token_hash, "
+            "eligible_at) VALUES (%s::uuid, %s, %s, %s) RETURNING id::text",
+            (user_id, cancel_token_hash, confirm_token_hash, as_utc(eligible_at)),
+        ).fetchone()
+        return row[0] if row else None
+
+
+def mfa_reset_request_get_active(user_id):
+    """Return the user's pending reset request or None. Never logs its arguments."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT id::text AS id, user_id::text AS user_id, cancel_token_hash, "
+            "confirm_token_hash, requested_at, eligible_at, status, used_at "
+            "FROM mfa_reset_requests WHERE user_id = %s::uuid AND status = 'pending' "
+            "ORDER BY requested_at DESC",
+            (user_id,),
+        ).fetchone()
+
+
+def mfa_reset_request_set_status(request_id, status, only_if_pending=True):
+    """Complete / cancel / expire a reset request. Returns rows changed (0 = race lost)."""
+    sql = ("UPDATE mfa_reset_requests SET status = %s, "
+           "used_at = CASE WHEN %s IN ('completed', 'cancelled') THEN now() ELSE used_at END "
+           "WHERE id = %s::uuid")
+    params = [status, status, request_id]
+    if only_if_pending:
+        sql += " AND status = 'pending'"
+    with transaction() as conn:
+        return conn.execute(sql, tuple(params)).rowcount

@@ -164,13 +164,15 @@ def login():
             auth.login_limiter.hit(key)
             flash(generic, "error")
             return render_template("admin/login.html", next=nxt, email=email), 401
-        auth.login_limiter.reset(key)
-
         # Two-factor authentication check for admin
         if profile.get("totp_secret"):
-            auth._set_pending_2fa(profile, nxt, step="verify")
+            # D8: the counter is NOT reset here -- auth.verify_2fa() resets it
+            # once the code is correct, so a phished admin password does not buy
+            # unlimited code guesses (audit finding C2).
+            auth._set_pending_2fa(profile, nxt, step="verify", limiter_key=key)
             flash("Your account has two-factor authentication enabled. Please verify your code.", "info")
             return redirect(url_for("auth.verify_2fa"))
+        auth.login_limiter.reset(key)
 
         auth.start_session(profile, admin=True)
         try:

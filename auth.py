@@ -34,6 +34,7 @@ from flask import (Blueprint, flash, g, jsonify, redirect, render_template,
                    request, session, url_for)
 
 import db
+import mfa_rate_limit
 import supabase_client as sb
 import totp_auth
 from notifications import send_notification_auto, _is_valid_phone
@@ -142,6 +143,10 @@ class _RateLimiter:
 
 login_limiter = _RateLimiter(8, 300)
 signup_limiter = _RateLimiter(5, 3600)
+# Cheap pre-DB throttle for the 2FA code routes.  The authoritative counter is
+# mfa_rate_limit (backed by the mfa_attempts table); this one only stops a flood
+# before it reaches the database, and is per-process by design.
+mfa_limiter = _RateLimiter(10, 300)
 
 
 def client_ip():
@@ -403,26 +408,43 @@ def login():
         if not _EMAIL_RE.match(email) or not password:
             flash("Enter your email and password.", "error")
             return render_template("login.html", next=nxt), 400
+        ip_hash = mfa_rate_limit.hash_ip(client_ip())
         try:
             profile = verify_credentials(email, password)
         except LoginError as exc:
             login_limiter.hit(key)
+            # The account behind the address is unknown at this point, so the row
+            # carries no user_id and only feeds the per-IP counter.
+            # TODO(mfa): resolving the profile id for a failed password would let
+            # these count toward the per-account lockout too -- see
+            # docs/mfa_threat_model.md.
+            mfa_rate_limit.record_failure("password", user_id=None, ip_hash=ip_hash)
             flash(exc.message, "error")
             return render_template("login.html", next=nxt, email=email), 401
-        login_limiter.reset(key)
+        # The login counter is deliberately NOT reset here: resetting it on
+        # password success is what let an attacker with a phished password make
+        # unlimited code guesses (audit finding C2).  It is reset only once the
+        # account is really signed in -- below when the user has no 2FA, or in
+        # verify_2fa() after a correct code.
 
         # --- Two-factor authentication check ---
         totp_secret = profile.get("totp_secret")
         two_factor_pending = profile.get("two_factor_pending")
         if totp_secret:
-            # 2FA is fully set up → require TOTP code
-            _set_pending_2fa(profile, nxt, step="verify")
+            # 2FA is fully set up → require TOTP code.  No `password` success is
+            # recorded yet: a success row resets the per-account counter, and
+            # doing that here would hand a phished password unlimited code
+            # guesses -- the same hole D8 closes for login_limiter.
+            _set_pending_2fa(profile, nxt, step="verify", limiter_key=key)
             return redirect(url_for("auth.verify_2fa"))
         if two_factor_pending:
             # User opted into 2FA during signup but hasn't completed setup
-            _set_pending_2fa(profile, nxt, step="setup")
+            _set_pending_2fa(profile, nxt, step="setup", limiter_key=key)
             return redirect(url_for("auth.setup_2fa"))
 
+        login_limiter.reset(key)
+        mfa_rate_limit.record_success("password", user_id=str(profile["id"]),
+                                      ip_hash=ip_hash)
         start_session(profile)
         log_activity("login", user_id=profile["id"])
         flash(f"Welcome back, {profile['username']}!", "success")
@@ -549,11 +571,16 @@ def logout():
 _PENDING_2FA_SECONDS = 600  # 2FA pending state expires after 10 minutes
 
 
-def _set_pending_2fa(profile, next_url, step="verify"):
+def _set_pending_2fa(profile, next_url, step="verify", *, limiter_key=None):
     """Store a minimal pending-2FA marker in the session.
 
     The profile is NOT fully authenticated here — the caller must still prove
     possession of their authenticator device before ``start_session`` is called.
+
+    ``limiter_key`` is the caller's ``login_limiter`` key (decision D8).  It is
+    carried here so the password counter can be reset *after* the MFA step
+    succeeds instead of at password success; it contains no secret and no raw
+    password, only the same ip|email string the limiter already keys on.
     """
     session.clear()
     session["pending_2fa"] = {
@@ -564,6 +591,8 @@ def _set_pending_2fa(profile, next_url, step="verify"):
         "next": next_url,
         "created": time.time(),
     }
+    if limiter_key:
+        session["pending_2fa"]["limiter_key"] = limiter_key
 
 
 def _get_pending_2fa():
@@ -597,6 +626,41 @@ def _load_profile_by_id(uid):
         return None
 
 
+_TOTP_REJECTED = {"ok": False, "reason": "invalid", "drift_notice": False}
+
+
+def _verify_totp_for_user(secret, code, user_id):
+    """Replay-protected TOTP check for a user whose secret is already stored.
+
+    Resolves the `mfa_factors` anchor row that keys the replay store, then hands
+    off to `totp_auth.verify_totp`, which claims the matched time step so a
+    captured code cannot be used twice.
+
+    FAILS CLOSED: when the anchor cannot be resolved (database unavailable or
+    any other error) the code is NOT accepted.  That opens no bypass -- these
+    routes need the same database to load the profile in the first place.
+
+    The returned `reason` (invalid / replay / locked) is for the audit log only:
+    every one of them must render the same generic message to the user.
+    """
+    if not secret:
+        return dict(_TOTP_REJECTED)
+    try:
+        factor_id = db.mfa_get_or_create_totp_factor_id(str(user_id))
+    except db.DatabaseUnavailable:
+        factor_id = None
+    except Exception:
+        logger.exception("Could not resolve the TOTP replay anchor")
+        factor_id = None
+    if not factor_id:
+        try:
+            db.mfa_log_event("replay_store_unavailable", actor="auth", user_id=str(user_id))
+        except Exception:
+            pass
+        return {"ok": False, "reason": "locked", "drift_notice": False}
+    return totp_auth.verify_totp(secret, code, factor_id=factor_id, user_id=str(user_id))
+
+
 @auth_bp.route("/2fa/setup", methods=["GET", "POST"])
 def setup_2fa():
     """First-time 2FA setup: show QR code, verify a test code, store the secret."""
@@ -615,12 +679,43 @@ def setup_2fa():
         if not secret or not code:
             flash("Please enter the code from your authenticator app.", "error")
             return redirect(url_for("auth.setup_2fa"))
-        if not totp_auth.verify_code(secret, code):
+        mfa_key = f"{client_ip()}|{pending['uid']}"
+        if totp_auth.canonical_code(code) is None:
+            # A malformed code carries no security signal and is the cheapest
+            # DoS vector, so it is answered generically before ANY database work
+            # (plan D5).  verify_totp applies the same guard; gating here is
+            # what keeps the route from paying for a limiter read and the anchor
+            # upsert first.
+            mfa_limiter.hit(mfa_key)
+            flash("Invalid code. Please check your authenticator app and try again.", "error")
+            session["_2fa_setup_secret"] = secret
+            return redirect(url_for("auth.setup_2fa"))
+        # Enrolment: the secret is not stored yet, so there is no factor row to
+        # key the replay store on (factor_id=None).  TODO(mfa): enrolment is not
+        # replay-protected -- see docs/mfa_threat_model.md and totp_auth.verify_totp.
+        ip_hash = mfa_rate_limit.hash_ip(client_ip())
+        # The cheap in-process throttle short-circuits first, so a flood never
+        # reaches the database; mfa_rate_limit is the authoritative counter.
+        if mfa_limiter.blocked(mfa_key) or \
+                mfa_rate_limit.check(user_id=str(pending["uid"]), ip_hash=ip_hash).locked:
+            flash(mfa_rate_limit.GENERIC_LOCKOUT_MESSAGE, "error")
+            session["_2fa_setup_secret"] = secret
+            return redirect(url_for("auth.setup_2fa"))
+        verified = totp_auth.verify_totp(secret, code, factor_id=None,
+                                         user_id=str(pending["uid"]))
+        if not verified["ok"]:
+            mfa_limiter.hit(mfa_key)
+            # apply_delay=False: the check() above already paid the per-IP
+            # slowdown for this request.
+            mfa_rate_limit.record_failure("totp", user_id=str(pending["uid"]),
+                                          ip_hash=ip_hash, apply_delay=False)
             flash("Invalid code. Please check your authenticator app and try again.", "error")
             # keep a fresh secret in session so the user can retry
             session["_2fa_setup_secret"] = secret
             return redirect(url_for("auth.setup_2fa"))
-        # Success — persist the secret and clear the pending flag
+        # Success — persist the secret and clear the pending flag.  The success
+        # is recorded only once the secret is actually stored: a success row
+        # resets the per-account counter, so a failed save must not clear it.
         profile = _load_profile_by_id(pending["uid"])
         if profile and profile["is_active"]:
             try:
@@ -639,8 +734,17 @@ def setup_2fa():
                 flash("Could not save 2FA settings. Try again.", "error")
                 session["_2fa_setup_secret"] = secret
                 return redirect(url_for("auth.setup_2fa"))
+            mfa_rate_limit.record_success("totp", user_id=str(pending["uid"]),
+                                          ip_hash=ip_hash)
+            limiter_key = pending.get("limiter_key")
             _clear_pending_2fa()
             start_session(profile)
+            # D8: the password counter is cleared only now that the MFA step is done.
+            if limiter_key:
+                login_limiter.reset(limiter_key)
+            mfa_limiter.reset(mfa_key)
+            if verified.get("drift_notice"):
+                session["mfa_clock_drift"] = True
             log_activity("2fa_enabled", user_id=profile["id"])
             flash("Two-factor authentication is now enabled. Welcome!", "success")
             return redirect(pending.get("next") or url_for("dashboard"))
@@ -679,18 +783,54 @@ def verify_2fa():
         if not code:
             flash("Please enter the 6-digit code from your authenticator app.", "error")
             return render_template("2fa_verify.html", email=pending["email"]), 400
+        mfa_key = f"{client_ip()}|{pending['uid']}"
+        if totp_auth.canonical_code(code) is None:
+            # Malformed input is answered generically before any database work
+            # (plan D5) -- no profile load, no limiter read, no anchor upsert.
+            # Same status and text as a wrong code, so nothing is revealed.
+            mfa_limiter.hit(mfa_key)
+            flash("Invalid code. Please try again.", "error")
+            return render_template("2fa_verify.html", email=pending["email"]), 401
         profile = _load_profile_by_id(pending["uid"])
         if profile is None:
             flash("Your session expired. Please sign in again.", "error")
             _clear_pending_2fa()
             return redirect(url_for("auth.login"))
         secret = profile.get("totp_secret")
-        if not secret or not totp_auth.verify_code(secret, code):
+        ip_hash = mfa_rate_limit.hash_ip(client_ip())
+        # Cheap in-process throttle first, authoritative DB counter second.
+        if mfa_limiter.blocked(mfa_key) or \
+                mfa_rate_limit.check(user_id=str(profile["id"]), ip_hash=ip_hash).locked:
+            # Generic message, and the pending state is left intact so a locked
+            # user is not also pushed back through the password step.
+            flash(mfa_rate_limit.GENERIC_LOCKOUT_MESSAGE, "error")
+            return render_template("2fa_verify.html", email=pending["email"]), 429
+        verified = _verify_totp_for_user(secret, code, profile["id"])
+        if not verified["ok"]:
+            mfa_limiter.hit(mfa_key)
+            # apply_delay=False: the check() above already paid the per-IP
+            # slowdown for this request.
+            mfa_rate_limit.record_failure("totp", user_id=str(profile["id"]),
+                                          ip_hash=ip_hash, apply_delay=False)
+            # invalid / replay / locked all render the same message and status as
+            # today's invalid-code path, so a reused code reveals nothing extra.
             flash("Invalid code. Please try again.", "error")
             return render_template("2fa_verify.html", email=pending["email"]), 401
         # Success
+        mfa_rate_limit.record_success("totp", user_id=str(profile["id"]),
+                                      ip_hash=ip_hash)
+        # D8: the password counter carried over from /login is cleared only now.
+        # The fallback (a session created before D8 landed) rebuilds the key the
+        # way /login builds it -- stripped and lowercased -- so a stored address
+        # with different case still clears the right counter.
+        limiter_key = pending.get("limiter_key") or \
+            f"{client_ip()}|{(pending.get('email') or '').strip().lower()}"
         _clear_pending_2fa()
         start_session(profile)
+        login_limiter.reset(limiter_key)
+        mfa_limiter.reset(mfa_key)
+        if verified.get("drift_notice"):
+            session["mfa_clock_drift"] = True
         log_activity("login_2fa", user_id=profile["id"])
         flash(f"Welcome back, {profile['username']}!", "success")
         return redirect(pending.get("next") or url_for("dashboard"))
@@ -711,7 +851,28 @@ def disable_2fa():
         flash("Two-factor authentication is not enabled.", "info")
         return redirect(url_for("dashboard"))
     code = (request.form.get("code") or "").strip()
-    if not totp_auth.verify_code(secret, code):
+    mfa_key = f"{client_ip()}|{user['id']}"
+    if totp_auth.canonical_code(code) is None:
+        # Malformed input costs no database work (plan D5) and gets the same
+        # generic answer as a wrong code; 2FA stays enabled either way.
+        mfa_limiter.hit(mfa_key)
+        flash("Invalid code — 2FA was not disabled.", "error")
+        return redirect(url_for("dashboard"))
+    ip_hash = mfa_rate_limit.hash_ip(client_ip())
+    # Cheap in-process throttle first, authoritative DB counter second.
+    if mfa_limiter.blocked(mfa_key) or \
+            mfa_rate_limit.check(user_id=str(user["id"]), ip_hash=ip_hash).locked:
+        # Nothing is changed and nothing is revealed: same generic message as a
+        # per-account lockout anywhere else.
+        flash(mfa_rate_limit.GENERIC_LOCKOUT_MESSAGE, "error")
+        return redirect(url_for("dashboard"))
+    # invalid / replay / locked all give the same generic answer.
+    if not _verify_totp_for_user(secret, code, user["id"])["ok"]:
+        mfa_limiter.hit(mfa_key)
+        # apply_delay=False: the check() above already paid the per-IP slowdown
+        # for this request.
+        mfa_rate_limit.record_failure("totp", user_id=str(user["id"]),
+                                      ip_hash=ip_hash, apply_delay=False)
         flash("Invalid code — 2FA was not disabled.", "error")
         return redirect(url_for("dashboard"))
     try:
@@ -725,6 +886,8 @@ def disable_2fa():
         flash("Could not disable 2FA. Please try again.", "error")
         return redirect(url_for("dashboard"))
     flash("Two-factor authentication has been disabled.", "success")
+    mfa_rate_limit.record_success("totp", user_id=str(user["id"]), ip_hash=ip_hash)
+    mfa_limiter.reset(mfa_key)
     log_activity("2fa_disabled", user_id=user["id"])
     # Force session refresh so current_user() picks up the change
     g.pop("_user_loaded", None)
@@ -778,12 +941,21 @@ def heartbeat():
 # --------------------------------------------------------------------------
 def _inject():
     user = current_user()
+    # Session flag only -- no database read on the template path.  The notice is
+    # one-shot: the flag is consumed by the first page rendered after the
+    # verification that raised it, because the Bootstrap dismiss button is
+    # client-side only and the flag would otherwise come back on every page load
+    # until logout.  A fresh run of skew-only codes raises it again.
+    # TODO(mfa): move this notice to a real MFA settings page when one exists
+    # (docs/mfa_threat_model.md); the dashboard is the only place that renders today.
+    drift_notice = bool(session.pop("mfa_clock_drift", False))
     return {
         "current_user": user,
         "csrf_token": csrf_token,
         "heartbeat_seconds": HEARTBEAT_SECONDS,
         "allow_signup": ALLOW_SIGNUP,
         "totp_available": totp_auth.is_available,
+        "mfa_clock_drift_notice": drift_notice,
     }
 
 
